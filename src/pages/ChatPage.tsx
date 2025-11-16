@@ -339,7 +339,7 @@ const ChatPage = () => {
             <Button
               type="submit"
               className="w-full py-3 text-lg font-semibold"
-              style={{ backgroundColor: primaryAccentColor, color: "white" }}
+              style={{ backgroundColor: primaryAccentColor, color: secondaryAccentColor }}
               disabled={isLoadingResponse}
             >
               {isLoadingResponse ? (
