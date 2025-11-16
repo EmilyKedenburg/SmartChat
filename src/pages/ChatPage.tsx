@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MadeWithDyad } from "@/components/made-with-dyad";
 import { X, Send, Loader2 } from "lucide-react";
-import { useNavigate } from "react-router-dom"; {/* Corrected line */}
+import { useNavigate } from "react-router-dom";
 import { useSession } from "@/providers/SessionContextProvider";
 import { supabase } from "@/integrations/supabase/client";
 import { showSuccess, showError } from "@/utils/toast";
@@ -206,7 +206,7 @@ const ChatPage = () => {
           <ScrollArea className="flex-grow p-6 border-t border-b dark:border-gray-700">
             <div className="space-y-4">
               {messages.length === 0 && (
-                <div className="text-center text-gray-500 dark:text-gray-400 py-4">
+                <div className="text-center text-gray-500 dark:text-gray-400 py-2"> {/* Changed py-4 to py-2 */}
                   Start a conversation by asking a question or providing sources.
                 </div>
               )}
