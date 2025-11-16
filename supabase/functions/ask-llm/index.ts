@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.15.0'; // Import GoogleGenerativeAI
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -40,15 +41,7 @@ serve(async (req) => {
       });
     }
 
-    // --- Placeholder for LLM API call ---
-    // To integrate a real LLM (e.g., OpenAI, Anthropic), you'll need to:
-    // 1. Set an environment variable in Supabase for your LLM API key (e.g., LLM_API_KEY).
-    //    Go to your Supabase project -> Edge Functions -> Manage Secrets.
-    // 2. Replace the mock response below with an actual API call to your LLM provider.
-    //    You might need to install a library like 'openai' or 'anthropic' if you're using Deno's `npm:` specifier.
-
-    // Example with a hypothetical LLM API (uncomment and modify for actual use):
-    /*
+    // --- LLM API call using Google Gemini ---
     const LLM_API_KEY = Deno.env.get('LLM_API_KEY');
     if (!LLM_API_KEY) {
       return new Response(JSON.stringify({ error: 'LLM_API_KEY not set in Supabase secrets.' }), {
@@ -57,35 +50,19 @@ serve(async (req) => {
       });
     }
 
-    const llmPayload = {
-      model: 'gpt-4o', // Or your preferred LLM model
-      messages: [
-        { role: 'system', content: 'You are a helpful assistant that answers questions based on provided context.' },
-        { role: 'user', content: `Question: ${question}\nContext URLs: ${urls.join(', ')}` },
-      ],
-      // Add other LLM specific parameters like temperature, max_tokens, etc.
-    };
+    const genAI = new GoogleGenerativeAI(LLM_API_KEY);
+    const model = genAI.getGenerativeModel({ model: "gemini-pro" }); // Using gemini-pro, adjust if needed
 
-    const llmResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${LLM_API_KEY}`,
-      },
-      body: JSON.stringify(llmPayload),
-    });
+    const prompt = `You are a helpful assistant that answers questions based on provided context.
+    
+    Question: ${question}
+    ${urls.length > 0 ? `Context URLs: ${urls.join(', ')}` : ''}
+    
+    Please provide a concise and helpful answer.`;
 
-    if (!llmResponse.ok) {
-      const errorData = await llmResponse.json();
-      throw new Error(`LLM API error: ${llmResponse.status} - ${errorData.message || JSON.stringify(errorData)}`);
-    }
-
-    const llmData = await llmResponse.json();
-    const assistantResponse = llmData.choices[0].message.content;
-    */
-
-    // Mock response for initial setup
-    const assistantResponse = `Hello ${user.email}! You asked: "${question}". I also received these URLs: ${urls.join(', ')}. (This is a mock LLM response. Integrate your actual LLM API here!)`;
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const assistantResponse = response.text();
 
     return new Response(JSON.stringify({ response: assistantResponse }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
