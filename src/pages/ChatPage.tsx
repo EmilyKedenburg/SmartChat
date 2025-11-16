@@ -35,7 +35,7 @@ const ChatPage = () => {
   const navigate = useNavigate();
 
   const [question, setQuestion] = useState<string>("");
-  const [files, setFiles] = useState<File[]>(([]);
+  const [files, setFiles] = useState<File[]>([]); {/* Corrected line */}
   const [urls, setUrls] = useState<string[]>([""]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
