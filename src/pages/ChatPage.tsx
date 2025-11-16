@@ -95,7 +95,7 @@ const ChatPage = () => {
                 type="file"
                 multiple
                 onChange={handleFileChange}
-                className="block w-full h-10 text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 dark:file:bg-primary dark:file:text-primary-foreground dark:text-gray-400"
+                className="block w-full h-auto py-2 text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 dark:file:bg-primary dark:file:text-primary-foreground dark:text-gray-400"
               />
               <div className="mt-2 space-y-1">
                 {files.map((file, index) => (
