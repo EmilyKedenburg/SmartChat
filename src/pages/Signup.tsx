@@ -41,7 +41,7 @@ const Signup = () => {
           }}
           theme="light"
           redirectTo={window.location.origin}
-          defaultView="sign_up" // Set default view to sign up
+          defaultView="sign_up" // Ensure the default view is sign_up
           localization={{
             variables: {
               sign_up: {
