@@ -203,10 +203,10 @@ const ChatPage = () => {
         </CardHeader>
         <CardContent className="flex-grow flex flex-col p-0">
           {/* Message Display Area */}
-          <ScrollArea className="flex-grow px-6 pt-6 pb-4 border-t border-b dark:border-gray-700"> {/* Changed p-6 to px-6 pt-6 pb-4 */}
+          <ScrollArea className="flex-grow px-6 pt-6 pb-4 border-t border-b dark:border-gray-700">
             <div className="space-y-4">
               {messages.length === 0 && (
-                <div className="text-center text-gray-500 dark:text-gray-400 py-2">
+                <div className="text-center text-gray-500 dark:text-gray-400"> {/* Removed py-2 */}
                   Start a conversation by asking a question or providing sources.
                 </div>
               )}
