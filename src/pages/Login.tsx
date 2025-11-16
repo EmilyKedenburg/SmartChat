@@ -26,6 +26,7 @@ const Login = () => {
                   brand: primaryAccentColor, // Apply primary accent color to primary brand elements (button background)
                   brandAccent: primaryAccentColor, // Apply primary accent color to secondary brand elements (like hover states)
                   defaultButtonText: secondaryAccentColor, // Apply secondary accent color to button text
+                  defaultButtonTextHover: secondaryAccentColor, // Apply secondary accent color to button text on hover
                 },
               },
             },
