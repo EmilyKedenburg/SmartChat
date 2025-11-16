@@ -101,8 +101,8 @@
 
   /* Custom styling for the file input button */
   input[type="file"]::file-selector-button {
-    background-color: #9CC97F; /* Primary accent color */
-    color: #537E72; /* Secondary accent color for text */
+    background-color: #537E72; /* Secondary accent color */
+    color: #9CC97F; /* Primary accent color for text */
     padding: 0.5rem 1rem;
     border-radius: 9999px; /* Full rounded */
     border: none;
@@ -114,7 +114,7 @@
   }
 
   input[type="file"]::file-selector-button:hover {
-    background-color: #9CC97F; /* Keep hover background consistent, or slightly darker if desired */
+    background-color: #537E72; /* Keep hover background consistent, or slightly darker if desired */
     opacity: 0.9; /* Slight opacity change for hover effect */
   }
 }
