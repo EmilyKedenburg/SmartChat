@@ -4,7 +4,6 @@ import { Auth } from "@supabase/auth-ui-react";
 import { ThemeSupa } from "@supabase/auth-ui-shared";
 import { supabase } from "@/integrations/supabase/client";
 import { MadeWithDyad } from "@/components/made-with-dyad";
-import { Link } from "react-router-dom"; // Import Link
 
 const Login = () => {
   const primaryAccentColor = "#9CC97F";
@@ -42,13 +41,14 @@ const Login = () => {
           }}
           theme="light" // Use light theme by default, can be made dynamic
           redirectTo={window.location.origin}
+          localization={{
+            variables: {
+              sign_in: {
+                welcome_text: "Sign in to your account", // Custom welcome text for sign-in
+              },
+            },
+          }}
         />
-        <div className="mt-4 text-center text-sm">
-          Don't have an account?{" "}
-          <Link to="/signup" className="text-blue-600 hover:underline" style={{ color: secondaryAccentColor }}>
-            Sign Up
-          </Link>
-        </div>
       </div>
       <MadeWithDyad />
     </div>

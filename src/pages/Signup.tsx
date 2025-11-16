@@ -4,7 +4,6 @@ import { Auth } from "@supabase/auth-ui-react";
 import { ThemeSupa } from "@supabase/auth-ui-shared";
 import { supabase } from "@/integrations/supabase/client";
 import { MadeWithDyad } from "@/components/made-with-dyad";
-import { Link } from "react-router-dom";
 
 const Signup = () => {
   const primaryAccentColor = "#9CC97F";
@@ -43,13 +42,14 @@ const Signup = () => {
           theme="light"
           redirectTo={window.location.origin}
           defaultView="sign_up" // Set default view to sign up
+          localization={{
+            variables: {
+              sign_up: {
+                welcome_text: "Create an account to get started with Smart Chat", // Custom welcome text for sign-up
+              },
+            },
+          }}
         />
-        <div className="mt-4 text-center text-sm">
-          Already have an account?{" "}
-          <Link to="/login" className="text-blue-600 hover:underline" style={{ color: secondaryAccentColor }}>
-            Sign In
-          </Link>
-        </div>
       </div>
       <MadeWithDyad />
     </div>
