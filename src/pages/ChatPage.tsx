@@ -35,7 +35,7 @@ const ChatPage = () => {
   const navigate = useNavigate();
 
   const [question, setQuestion] = useState<string>("");
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<File[]>(([]);
   const [urls, setUrls] = useState<string[]>([""]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
@@ -339,7 +339,7 @@ const ChatPage = () => {
             <Button
               type="submit"
               className="w-full py-3 text-lg font-semibold"
-              style={{ backgroundColor: primaryAccentColor, color: secondaryAccentColor }}
+              style={{ backgroundColor: primaryAccentColor, color: "#030816" }}
               disabled={isLoadingResponse}
             >
               {isLoadingResponse ? (
