@@ -152,7 +152,7 @@ const ChatPage = () => {
             <Button
               type="submit"
               className="w-full py-3 text-lg font-semibold"
-              style={{ backgroundColor: primaryAccentColor, color: secondaryAccentColor }} // Apply primary accent color to button
+              style={{ backgroundColor: primaryAccentColor, color: "hsl(var(--foreground))" }} // Changed text color to foreground
             >
               Submit
             </Button>
