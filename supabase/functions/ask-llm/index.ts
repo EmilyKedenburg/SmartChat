@@ -54,9 +54,9 @@ serve(async (req) => {
     const model = genAI.getGenerativeModel({ model: "gemini-pro" }); // Using gemini-pro, adjust if needed
 
     const prompt = `You are a helpful assistant that answers questions based on provided context.
+    ${urls.length > 0 ? `Here are some URLs that might contain relevant information: ${urls.join(', ')}. Please use these as context and, if you directly reference information from them, try to cite the URL in your response.` : ''}
     
     Question: ${question}
-    ${urls.length > 0 ? `Context URLs: ${urls.join(', ')}` : ''}
     
     Please provide a concise and helpful answer.`;
 
