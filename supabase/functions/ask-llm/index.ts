@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.15.0'; // Import GoogleGenerativeAI
+import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.16.0'; // Updated to 0.16.0
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -51,7 +51,7 @@ serve(async (req) => {
     }
 
     const genAI = new GoogleGenerativeAI(LLM_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" }); // Changed model name to gemini-1.0-pro
+    const model = genAI.getGenerativeModel({ model: "gemini-pro" }); // Reverted to "gemini-pro" as it's the common identifier
 
     const prompt = `You are a helpful assistant that answers questions based on provided context.
     ${urls.length > 0 ? `Here are some URLs that might contain relevant information: ${urls.join(', ')}. Please use these as context and, if you directly reference information from them, try to cite the URL in your response.` : ''}
