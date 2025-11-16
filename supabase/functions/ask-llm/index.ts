@@ -38,6 +38,25 @@ async function fetchUrlContent(url: string): Promise<string | null> {
   }
 }
 
+// Function to download file content from Supabase Storage
+async function downloadFileContent(supabaseClient: any, filePath: string): Promise<string | null> {
+  try {
+    const { data, error } = await supabaseClient.storage.from('chat-files').download(filePath);
+    if (error) {
+      console.error(`Error downloading file ${filePath}:`, error);
+      return null;
+    }
+    if (data) {
+      // Assuming text files, read as text
+      return await data.text();
+    }
+    return null;
+  } catch (error) {
+    console.error(`Error processing downloaded file ${filePath}:`, error);
+    return null;
+  }
+}
+
 serve(async (req) => {
   // Handle CORS preflight request
   if (req.method === 'OPTIONS') {
@@ -99,11 +118,21 @@ serve(async (req) => {
       }
     }
 
-    // Acknowledge uploaded files
+    // Fetch content from uploaded files
     if (filePaths && filePaths.length > 0) {
-      context += `\n\n--- Uploaded Files ---\n`;
-      context += `The user has provided the following files (by path): ${filePaths.join(', ')}. Please note that their content is not directly available in this prompt, but you can acknowledge their existence if relevant.\n`;
-      context += `\n-------------------------\n`;
+      const fileContents = await Promise.all(filePaths.map(filePath => downloadFileContent(supabaseClient, filePath)));
+      const validFileContents = fileContents.filter(content => content !== null) as string[];
+      if (validFileContents.length > 0) {
+        context += `\n\n--- Context from Uploaded Files ---\n`;
+        validFileContents.forEach((content, index) => {
+          context += `\nFile ${filePaths[index]}:\n${content}\n`;
+        });
+        context += `\n-------------------------\n`;
+      } else {
+        context += `\n\n--- Uploaded Files ---\n`;
+        context += `The user has provided the following files (by path): ${filePaths.join(', ')}. Their content could not be retrieved or was empty.\n`;
+        context += `\n-------------------------\n`;
+      }
     }
 
     const prompt = `You are a helpful assistant that answers questions based on provided context.
@@ -111,7 +140,7 @@ serve(async (req) => {
     
     Question: ${question}
     
-    Please provide a concise and helpful answer. If you directly reference information from the provided URLs, try to cite the URL in your response.`;
+    Please provide a concise and helpful answer. If you directly reference information from the provided URLs or files, try to cite the source in your response.`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
