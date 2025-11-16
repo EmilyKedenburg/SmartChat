@@ -130,6 +130,33 @@ const ChatPage = () => {
         .insert({ chat_id: currentChat, user_id: userId, content: trimmedQuestion, role: "user" });
       if (insertUserMessageError) throw insertUserMessageError;
 
+      const uploadedFilePaths: string[] = [];
+
+      // Handle file uploads to Supabase Storage
+      for (const file of files) {
+        const filePath = `${userId}/${currentChat}/${file.name}`;
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from("chat-files")
+          .upload(filePath, file, {
+            cacheControl: "3600",
+            upsert: false,
+          });
+
+        if (uploadError) {
+          console.error("Error uploading file:", uploadError);
+          showError(`Failed to upload file ${file.name}: ${uploadError.message}`);
+          continue; // Skip to the next file
+        }
+
+        uploadedFilePaths.push(filePath);
+
+        // Insert source entry for the uploaded file
+        const { error: insertSourceError } = await supabase
+          .from("sources")
+          .insert({ chat_id: currentChat, user_id: userId, type: file.type || "unknown", name: file.name, storage_path: filePath });
+        if (insertSourceError) console.error("Error inserting file source:", insertSourceError);
+      }
+
       // Handle URLs as sources
       for (const url of filteredUrls) {
         const { error: insertSourceError } = await supabase
@@ -138,15 +165,9 @@ const ChatPage = () => {
         if (insertSourceError) console.error("Error inserting URL source:", insertSourceError);
       }
 
-      // TODO: Implement file upload to Supabase Storage and pass paths to Edge Function
-      if (files.length > 0) {
-        showSuccess("File upload functionality is coming soon!");
-        console.log("Files to be uploaded:", files);
-      }
-
-      // Invoke Edge Function
+      // Invoke Edge Function with question, URLs, and uploaded file paths
       const { data, error: edgeFunctionError } = await supabase.functions.invoke("ask-llm", {
-        body: { question: trimmedQuestion, urls: filteredUrls },
+        body: { question: trimmedQuestion, urls: filteredUrls, filePaths: uploadedFilePaths },
       });
 
       if (edgeFunctionError) throw edgeFunctionError;
@@ -271,7 +292,7 @@ const ChatPage = () => {
             {/* File Upload */}
             <div>
               <Label htmlFor="file-upload" className="text-sm font-medium mb-2 block">
-                Upload Files (PDF, Text, DOC/DOCx)
+                Upload Files (Text files recommended for direct processing)
               </Label>
               <Input
                 id="file-upload"

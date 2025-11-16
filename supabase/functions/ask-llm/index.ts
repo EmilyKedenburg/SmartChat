@@ -1,11 +1,42 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.16.0';
+import { DOMParser } from "https://deno.land/x/deno_dom/deno-dom-wasm.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// Function to fetch and extract text content from a URL
+async function fetchUrlContent(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.warn(`Failed to fetch URL ${url}: ${response.statusText}`);
+      return null;
+    }
+    const html = await response.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    if (doc) {
+      // Extract text from common content elements, or fallback to body text
+      const contentElements = doc.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li, span");
+      let extractedText = "";
+      if (contentElements.length > 0) {
+        extractedText = Array.from(contentElements).map(el => el.textContent).join("\n");
+      } else {
+        extractedText = doc.body?.textContent || "";
+      }
+      // Basic cleanup: remove excessive whitespace and newlines
+      return extractedText.replace(/\s+/g, ' ').trim();
+    }
+    return null;
+  } catch (error) {
+    console.error(`Error fetching or parsing URL ${url}:`, error);
+    return null;
+  }
+}
 
 serve(async (req) => {
   // Handle CORS preflight request
@@ -32,10 +63,10 @@ serve(async (req) => {
     }
 
     // Parse the request body
-    const { question, urls } = await req.json();
+    const { question, urls, filePaths } = await req.json();
 
-    if (!question && (!urls || urls.length === 0)) {
-      return new Response(JSON.stringify({ error: 'Question or URLs are required' }), {
+    if (!question && (!urls || urls.length === 0) && (!filePaths || filePaths.length === 0)) {
+      return new Response(JSON.stringify({ error: 'Question, URLs, or files are required' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 400,
       });
@@ -51,14 +82,36 @@ serve(async (req) => {
     }
 
     const genAI = new GoogleGenerativeAI(LLM_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); // Updated to use the correct model name
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+    let context = "";
+
+    // Fetch content from URLs
+    if (urls && urls.length > 0) {
+      const urlContents = await Promise.all(urls.map(fetchUrlContent));
+      const validUrlContents = urlContents.filter(content => content !== null) as string[];
+      if (validUrlContents.length > 0) {
+        context += `\n\n--- Context from URLs ---\n`;
+        validUrlContents.forEach((content, index) => {
+          context += `\nURL ${urls[index]}:\n${content}\n`;
+        });
+        context += `\n-------------------------\n`;
+      }
+    }
+
+    // Acknowledge uploaded files
+    if (filePaths && filePaths.length > 0) {
+      context += `\n\n--- Uploaded Files ---\n`;
+      context += `The user has provided the following files (by path): ${filePaths.join(', ')}. Please note that their content is not directly available in this prompt, but you can acknowledge their existence if relevant.\n`;
+      context += `\n-------------------------\n`;
+    }
 
     const prompt = `You are a helpful assistant that answers questions based on provided context.
-    ${urls.length > 0 ? `Here are some URLs that might contain relevant information: ${urls.join(', ')}. Please use these as context and, if you directly reference information from them, try to cite the URL in your response.` : ''}
+    ${context}
     
     Question: ${question}
     
-    Please provide a concise and helpful answer.`;
+    Please provide a concise and helpful answer. If you directly reference information from the provided URLs, try to cite the URL in your response.`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
