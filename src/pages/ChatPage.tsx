@@ -16,6 +16,10 @@ const ChatPage = () => {
   const [urls, setUrls] = useState<string[]>([""]); // Start with one empty URL input
   const navigate = useNavigate();
 
+  // Define accent colors for consistency
+  const primaryAccentColor = "#9CC97F";
+  const secondaryAccentColor = "#537E72";
+
   const handleQuestionChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     setQuestion(e.target.value);
   };
@@ -57,7 +61,10 @@ const ChatPage = () => {
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-100 dark:bg-gray-900 p-4">
       <Card className="w-full max-w-2xl bg-white dark:bg-gray-800 shadow-lg rounded-lg p-6">
         <CardHeader>
-          <CardTitle className="text-3xl font-bold text-center mb-6 text-gray-900 dark:text-white">
+          <CardTitle
+            className="text-3xl font-bold text-center mb-6 text-gray-900 dark:text-white"
+            style={{ color: secondaryAccentColor }} // Apply secondary accent color
+          >
             Ask a Question
           </CardTitle>
         </CardHeader>
@@ -88,7 +95,7 @@ const ChatPage = () => {
                 type="file"
                 multiple
                 onChange={handleFileChange}
-                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 dark:file:bg-primary dark:file:text-primary-foreground dark:text-gray-400"
+                className="block w-full h-10 text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 dark:file:bg-primary dark:file:text-primary-foreground dark:text-gray-400"
               />
               <div className="mt-2 space-y-1">
                 {files.map((file, index) => (
@@ -142,7 +149,11 @@ const ChatPage = () => {
               </div>
             </div>
 
-            <Button type="submit" className="w-full py-3 text-lg font-semibold">
+            <Button
+              type="submit"
+              className="w-full py-3 text-lg font-semibold"
+              style={{ backgroundColor: primaryAccentColor, color: secondaryAccentColor }} // Apply primary accent color to button
+            >
               Submit
             </Button>
           </form>
