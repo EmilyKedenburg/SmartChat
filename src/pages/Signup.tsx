@@ -4,9 +4,9 @@ import { Auth } from "@supabase/auth-ui-react";
 import { ThemeSupa } from "@supabase/auth-ui-shared";
 import { supabase } from "@/integrations/supabase/client";
 import { MadeWithDyad } from "@/components/made-with-dyad";
-import { Link } from "react-router-dom"; // Import Link
+import { Link } from "react-router-dom";
 
-const Login = () => {
+const Signup = () => {
   const primaryAccentColor = "#9CC97F";
   const secondaryAccentColor = "#537E72";
 
@@ -14,39 +14,40 @@ const Login = () => {
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-100 dark:bg-gray-900 p-4">
       <div className="w-full max-w-md bg-white dark:bg-gray-800 p-8 rounded-lg shadow-md">
         <h1 className="text-3xl font-bold text-center mb-6" style={{ color: secondaryAccentColor }}>
-          Login to get started with Smart Chat
+          Create an account to get started with Smart Chat
         </h1>
         <Auth
           supabaseClient={supabase}
-          providers={[]} // You can add 'google', 'github', etc. here if desired
+          providers={[]}
           appearance={{
             theme: ThemeSupa,
             variables: {
               default: {
                 colors: {
-                  brand: primaryAccentColor, // Apply primary accent color to primary brand elements (button background)
-                  brandAccent: primaryAccentColor, // Apply primary accent color to secondary brand elements (like hover states)
-                  button: { // More specific targeting for button styles
+                  brand: primaryAccentColor,
+                  brandAccent: primaryAccentColor,
+                  button: {
                     default: {
                       background: primaryAccentColor,
                       text: secondaryAccentColor,
                     },
                     hover: {
-                      background: primaryAccentColor, // Keep hover background consistent
-                      text: secondaryAccentColor, // Keep hover text consistent
+                      background: primaryAccentColor,
+                      text: secondaryAccentColor,
                     },
                   },
                 },
               },
             },
           }}
-          theme="light" // Use light theme by default, can be made dynamic
+          theme="light"
           redirectTo={window.location.origin}
+          defaultView="sign_up" // Set default view to sign up
         />
         <div className="mt-4 text-center text-sm">
-          Don't have an account?{" "}
-          <Link to="/signup" className="text-blue-600 hover:underline" style={{ color: secondaryAccentColor }}>
-            Sign Up
+          Already have an account?{" "}
+          <Link to="/login" className="text-blue-600 hover:underline" style={{ color: secondaryAccentColor }}>
+            Sign In
           </Link>
         </div>
       </div>
@@ -55,4 +56,4 @@ const Login = () => {
   );
 };
 
-export default Login;
+export default Signup;
