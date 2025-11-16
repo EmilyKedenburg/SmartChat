@@ -102,7 +102,7 @@
   /* Custom styling for the file input button */
   input[type="file"]::file-selector-button {
     background-color: #537E72; /* Secondary accent color */
-    color: #9CC97F; /* Primary accent color for text */
+    color: white; /* Changed to white */
     padding: 0.5rem 1rem;
     border-radius: 9999px; /* Full rounded */
     border: none;
