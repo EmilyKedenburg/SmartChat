@@ -95,7 +95,7 @@ const ChatPage = () => {
                 type="file"
                 multiple
                 onChange={handleFileChange}
-                className={`block w-full h-auto py-2 text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[${primaryAccentColor}] file:text-[${secondaryAccentColor}] hover:file:bg-[${primaryAccentColor}]/90 dark:text-gray-400`}
+                className="block w-full h-auto py-2 text-sm text-gray-500 dark:text-gray-400" // Removed file: classes
               />
               <div className="mt-2 space-y-1">
                 {files.map((file, index) => (
@@ -133,7 +133,7 @@ const ChatPage = () => {
                     {urls.length > 1 && (
                       <Button
                         type="button"
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
                         onClick={() => handleRemoveUrl(index)}
                         className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
