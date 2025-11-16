@@ -1,18 +1,14 @@
 import { MadeWithDyad } from "@/components/made-with-dyad";
 import { useSession } from "@/providers/SessionContextProvider";
 import { Button } from "@/components/ui/button";
-import { useNavigate } from "react-router-dom"; // Import useNavigate
+import { useNavigate } from "react-router-dom";
 
 const Index = () => {
   const { session, isLoading, supabase } = useSession();
-  const navigate = useNavigate(); // Initialize useNavigate
+  const navigate = useNavigate();
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-  };
-
-  const handleGoToChat = () => {
-    navigate("/chat"); // Navigate to the new chat page
   };
 
   if (isLoading) {
@@ -38,12 +34,9 @@ const Index = () => {
           Welcome, {session.user?.email}!
         </h1>
         <p className="text-xl text-gray-600 dark:text-gray-400 mb-8">
-          You are now authenticated. Start building your amazing project here!
+          You are now authenticated. This is your personal dashboard.
         </p>
-        <div className="flex space-x-4 mb-8"> {/* Added a div for buttons */}
-          <Button onClick={handleGoToChat} variant="default">
-            Go to Chat Interface
-          </Button>
+        <div className="flex space-x-4 mb-8">
           <Button onClick={handleLogout} variant="destructive">
             Logout
           </Button>

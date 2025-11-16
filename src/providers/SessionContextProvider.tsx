@@ -25,7 +25,7 @@ export const SessionContextProvider = ({ children }: { children: React.ReactNode
         setIsLoading(false);
 
         if (event === "SIGNED_IN") {
-          navigate("/"); // Redirect authenticated users to the main page
+          navigate("/"); // Redirect authenticated users to the main page (now ChatPage)
         } else if (event === "SIGNED_OUT") {
           navigate("/login"); // Redirect unauthenticated users to the login page
         }
@@ -37,6 +37,8 @@ export const SessionContextProvider = ({ children }: { children: React.ReactNode
       setIsLoading(false);
       if (!session) {
         navigate("/login");
+      } else {
+        navigate("/"); // Redirect to the main page (ChatPage) if session exists
       }
     });
 
