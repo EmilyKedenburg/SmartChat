@@ -229,7 +229,7 @@ const ChatPage = () => {
                         ? "bg-blue-500 text-white"
                         : "bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white"
                     }`}
-                    style={msg.role === "user" ? { backgroundColor: primaryAccentColor, color: secondaryAccentColor } : {}}
+                    style={msg.role === "user" ? { backgroundColor: primaryAccentColor, color: "white" } : {}}
                   >
                     <p className="text-sm">{msg.content}</p>
                     <p className="text-xs text-right mt-1 opacity-75">
@@ -339,7 +339,7 @@ const ChatPage = () => {
             <Button
               type="submit"
               className="w-full py-3 text-lg font-semibold"
-              style={{ backgroundColor: primaryAccentColor, color: secondaryAccentColor }}
+              style={{ backgroundColor: primaryAccentColor, color: "white" }}
               disabled={isLoadingResponse}
             >
               {isLoadingResponse ? (
