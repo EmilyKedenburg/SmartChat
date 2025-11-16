@@ -23,10 +23,18 @@ const Login = () => {
             variables: {
               default: {
                 colors: {
-                  brand: primaryAccentColor, // Apply primary accent color to primary brand elements (button background)
-                  brandAccent: primaryAccentColor, // Apply primary accent color to secondary brand elements (like hover states)
-                  defaultButtonText: secondaryAccentColor, // Apply secondary accent color to button text
-                  defaultButtonTextHover: secondaryAccentColor, // Apply secondary accent color to button text on hover
+                  brand: primaryAccentColor, // Primary brand color (button background)
+                  brandAccent: primaryAccentColor, // Hover/focus state for brand elements
+                  button: { // More specific targeting for button styles
+                    default: {
+                      background: primaryAccentColor,
+                      text: secondaryAccentColor,
+                    },
+                    hover: {
+                      background: primaryAccentColor, // Keep hover background consistent
+                      text: secondaryAccentColor, // Keep hover text consistent
+                    },
+                  },
                 },
               },
             },
