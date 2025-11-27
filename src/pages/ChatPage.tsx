@@ -130,9 +130,9 @@ const ChatPage = () => {
         .insert({ chat_id: currentChat, user_id: userId, content: trimmedQuestion, role: "user" });
       if (insertUserMessageError) throw insertUserMessageError;
 
-      const uploadedFilePaths: string[] = [];
+      const sourceIds: string[] = [];
 
-      // Handle file uploads to Supabase Storage
+      // Handle file uploads to Supabase Storage and create source entries
       for (const file of files) {
         const filePath = `${userId}/${currentChat}/${file.name}`;
         const { data: uploadData, error: uploadError } = await supabase.storage
@@ -148,26 +148,40 @@ const ChatPage = () => {
           continue; // Skip to the next file
         }
 
-        uploadedFilePaths.push(filePath);
-
         // Insert source entry for the uploaded file
-        const { error: insertSourceError } = await supabase
+        const { data: sourceData, error: insertSourceError } = await supabase
           .from("sources")
-          .insert({ chat_id: currentChat, user_id: userId, type: file.type || "unknown", name: file.name, storage_path: filePath });
-        if (insertSourceError) console.error("Error inserting file source:", insertSourceError);
+          .insert({ chat_id: currentChat, user_id: userId, type: file.type || "application/octet-stream", name: file.name, storage_path: filePath })
+          .select("id")
+          .single();
+
+        if (insertSourceError) {
+          console.error("Error inserting file source:", insertSourceError);
+          showError(`Failed to record file source ${file.name}: ${insertSourceError.message}`);
+        } else if (sourceData) {
+          sourceIds.push(sourceData.id);
+        }
       }
 
       // Handle URLs as sources
       for (const url of filteredUrls) {
-        const { error: insertSourceError } = await supabase
+        const { data: sourceData, error: insertSourceError } = await supabase
           .from("sources")
-          .insert({ chat_id: currentChat, user_id: userId, type: "url", name: url, content: url });
-        if (insertSourceError) console.error("Error inserting URL source:", insertSourceError);
+          .insert({ chat_id: currentChat, user_id: userId, type: "url", name: url, content: url }) // content initially stores the URL itself
+          .select("id")
+          .single();
+
+        if (insertSourceError) {
+          console.error("Error inserting URL source:", insertSourceError);
+          showError(`Failed to record URL source ${url}: ${insertSourceError.message}`);
+        } else if (sourceData) {
+          sourceIds.push(sourceData.id);
+        }
       }
 
-      // Invoke Edge Function with question, URLs, and uploaded file paths
+      // Invoke Edge Function with question and source IDs
       const { data, error: edgeFunctionError } = await supabase.functions.invoke("ask-llm", {
-        body: { question: trimmedQuestion, urls: filteredUrls, filePaths: uploadedFilePaths },
+        body: { question: trimmedQuestion, sourceIds: sourceIds },
       });
 
       if (edgeFunctionError) throw edgeFunctionError;

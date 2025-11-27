@@ -82,10 +82,10 @@ serve(async (req) => {
     }
 
     // Parse the request body
-    const { question, urls, filePaths } = await req.json();
+    const { question, sourceIds } = await req.json();
 
-    if (!question && (!urls || urls.length === 0) && (!filePaths || filePaths.length === 0)) {
-      return new Response(JSON.stringify({ error: 'Question, URLs, or files are required' }), {
+    if (!question && (!sourceIds || sourceIds.length === 0)) {
+      return new Response(JSON.stringify({ error: 'Question or sources are required' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 400,
       });
@@ -104,33 +104,55 @@ serve(async (req) => {
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     let context = "";
+    const extractedContents: { id: string; content: string; name: string; type: string }[] = [];
 
-    // Fetch content from URLs
-    if (urls && urls.length > 0) {
-      const urlContents = await Promise.all(urls.map(fetchUrlContent));
-      const validUrlContents = urlContents.filter(content => content !== null) as string[];
-      if (validUrlContents.length > 0) {
-        context += `\n\n--- Context from URLs ---\n`;
-        validUrlContents.forEach((content, index) => {
-          context += `\nURL ${urls[index]}:\n${content}\n`;
+    if (sourceIds && sourceIds.length > 0) {
+      const { data: sources, error: fetchSourcesError } = await supabaseClient
+        .from('sources')
+        .select('*')
+        .in('id', sourceIds);
+
+      if (fetchSourcesError) {
+        console.error("Error fetching sources:", fetchSourcesError);
+        return new Response(JSON.stringify({ error: 'Failed to retrieve source information.' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 500,
         });
-        context += `\n-------------------------\n`;
       }
-    }
 
-    // Fetch content from uploaded files
-    if (filePaths && filePaths.length > 0) {
-      const fileContents = await Promise.all(filePaths.map(filePath => downloadFileContent(supabaseClient, filePath)));
-      const validFileContents = fileContents.filter(content => content !== null) as string[];
-      if (validFileContents.length > 0) {
-        context += `\n\n--- Context from Uploaded Files ---\n`;
-        validFileContents.forEach((content, index) => {
-          context += `\nFile ${filePaths[index]}:\n${content}\n`;
+      for (const source of sources || []) {
+        let content: string | null = null;
+        if (source.type === 'url') {
+          content = await fetchUrlContent(source.name);
+        } else if (source.storage_path) { // Assuming files have storage_path
+          content = await downloadFileContent(supabaseClient, source.storage_path);
+        }
+
+        if (content) {
+          extractedContents.push({ id: source.id, content, name: source.name, type: source.type });
+          // Update the source record in the database with the extracted content
+          const { error: updateSourceError } = await supabaseClient
+            .from('sources')
+            .update({ content: content })
+            .eq('id', source.id);
+
+          if (updateSourceError) {
+            console.error(`Error updating source ${source.id} with content:`, updateSourceError);
+          }
+        } else {
+          console.warn(`Could not extract content for source ${source.id} (type: ${source.type}, name: ${source.name})`);
+        }
+      }
+
+      if (extractedContents.length > 0) {
+        context += `\n\n--- Provided Context ---\n`;
+        extractedContents.forEach((item) => {
+          context += `\nSource (${item.type === 'url' ? 'URL' : 'File'}): ${item.name}\n${item.content}\n`;
         });
         context += `\n-------------------------\n`;
       } else {
-        context += `\n\n--- Uploaded Files ---\n`;
-        context += `The user has provided the following files (by path): ${filePaths.join(', ')}. Their content could not be retrieved or was empty.\n`;
+        context += `\n\n--- Provided Context ---\n`;
+        context += `No readable content was extracted from the provided sources.\n`;
         context += `\n-------------------------\n`;
       }
     }
