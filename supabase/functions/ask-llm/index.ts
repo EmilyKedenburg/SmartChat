@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.16.0';
 import { DOMParser } from "https://deno.land/x/deno_dom/deno-dom-wasm.ts";
+import { RecursiveCharacterTextSplitter } from "https://esm.sh/langchain/text_splitter";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -101,7 +102,8 @@ serve(async (req) => {
     }
 
     const genAI = new GoogleGenerativeAI(LLM_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const textEmbeddingModel = genAI.getGenerativeModel({ model: "embedding-001" });
+    const chatModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     let context = "";
     const extractedContents: { id: string; content: string; name: string; type: string }[] = [];
@@ -120,6 +122,11 @@ serve(async (req) => {
         });
       }
 
+      const textSplitter = new RecursiveCharacterTextSplitter({
+        chunkSize: 1000,
+        chunkOverlap: 200,
+      });
+
       for (const source of sources || []) {
         let content: string | null = null;
         if (source.type === 'url') {
@@ -130,7 +137,8 @@ serve(async (req) => {
 
         if (content) {
           extractedContents.push({ id: source.id, content, name: source.name, type: source.type });
-          // Update the source record in the database with the extracted content
+          
+          // Update the source record in the database with the extracted content (for SourceDisplay)
           const { error: updateSourceError } = await supabaseClient
             .from('sources')
             .update({ content: content })
@@ -139,20 +147,58 @@ serve(async (req) => {
           if (updateSourceError) {
             console.error(`Error updating source ${source.id} with content:`, updateSourceError);
           }
+
+          // Chunk the content and generate embeddings
+          const chunks = await textSplitter.splitText(content);
+          for (const chunk of chunks) {
+            const { embedding } = await textEmbeddingModel.embedContent({ content: chunk });
+            const { error: insertChunkError } = await supabaseClient
+              .from('document_chunks')
+              .insert({
+                source_id: source.id,
+                user_id: user.id,
+                chunk_text: chunk,
+                embedding: embedding,
+              });
+
+            if (insertChunkError) {
+              console.error(`Error inserting chunk for source ${source.id}:`, insertChunkError);
+            }
+          }
         } else {
           console.warn(`Could not extract content for source ${source.id} (type: ${source.type}, name: ${source.name})`);
         }
       }
 
-      if (extractedContents.length > 0) {
-        context += `\n\n--- Provided Context ---\n`;
-        extractedContents.forEach((item) => {
-          context += `\nSource (${item.type === 'url' ? 'URL' : 'File'}): ${item.name}\n${item.content}\n`;
+      // Generate embedding for the user's question
+      const { embedding: questionEmbedding } = await textEmbeddingModel.embedContent({ content: question });
+
+      // Retrieve relevant chunks from the vector store
+      const { data: relevantChunks, error: fetchChunksError } = await supabaseClient
+        .rpc('match_document_chunks', {
+          query_embedding: questionEmbedding,
+          match_threshold: 0.78, // Adjust as needed
+          match_count: 5, // Retrieve top 5 most relevant chunks
+          filter_source_ids: sourceIds // Filter by provided source IDs
+        });
+
+      if (fetchChunksError) {
+        console.error("Error fetching relevant chunks:", fetchChunksError);
+        return new Response(JSON.stringify({ error: 'Failed to retrieve relevant document chunks.' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 500,
+        });
+      }
+
+      if (relevantChunks && relevantChunks.length > 0) {
+        context += `\n\n--- Provided Context (from relevant chunks) ---\n`;
+        relevantChunks.forEach((item: any) => {
+          context += `\nChunk from Source ID ${item.source_id}:\n${item.chunk_text}\n`;
         });
         context += `\n-------------------------\n`;
       } else {
         context += `\n\n--- Provided Context ---\n`;
-        context += `No readable content was extracted from the provided sources.\n`;
+        context += `No relevant content was found in the provided sources for your question.\n`;
         context += `\n-------------------------\n`;
       }
     }
@@ -164,7 +210,7 @@ serve(async (req) => {
     
     Please provide a concise and helpful answer. If you directly reference information from the provided URLs or files, try to cite the source in your response.`;
 
-    const result = await model.generateContent(prompt);
+    const result = await chatModel.generateContent(prompt);
     const response = await result.response;
     const assistantResponse = response.text();
 
