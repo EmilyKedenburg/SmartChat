@@ -92,7 +92,7 @@ serve(async (req) => {
 
     console.log("[DEBUG] Initializing Google Generative AI...");
     const genAI = new GoogleGenerativeAI(Deno.env.get('LLM_API_KEY')!);
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); // Changed model here
 
     let prompt = `You are a helpful AI assistant. Answer the following question.`;
     if (context) {
