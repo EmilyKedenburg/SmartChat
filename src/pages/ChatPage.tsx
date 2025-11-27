@@ -231,9 +231,9 @@ const ChatPage = () => {
   return (
     <div className="min-h-screen flex flex-col items-center justify-between bg-gray-100 dark:bg-gray-900 p-4">
       <Card className="w-full max-w-2xl bg-white dark:bg-gray-800 shadow-lg rounded-lg flex flex-col h-[90vh]">
-        <CardHeader className="pb-4 flex flex-row items-center justify-between">
+        <CardHeader className="pb-4 flex items-center"> {/* Removed justify-between */}
           <CardTitle
-            className="text-3xl font-bold text-center text-gray-900 dark:text-white flex-grow"
+            className="text-3xl font-bold text-center text-gray-900 dark:text-white flex-grow" // flex-grow and text-center
             style={{ color: secondaryAccentColor }}
           >
             Smart Chat
