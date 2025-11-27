@@ -231,7 +231,7 @@ const ChatPage = () => {
   return (
     <div className="min-h-screen flex flex-col items-center justify-between bg-gray-100 dark:bg-gray-900 p-4">
       <Card className="w-full max-w-2xl bg-white dark:bg-gray-800 shadow-lg rounded-lg flex flex-col h-[90vh]">
-        <CardHeader className="pb-4 flex items-baseline"> {/* Changed items-center to items-baseline */}
+        <CardHeader className="pb-4 flex items-center">
           <CardTitle
             className="text-3xl font-bold text-center text-gray-900 dark:text-white flex-grow"
             style={{ color: secondaryAccentColor }}
