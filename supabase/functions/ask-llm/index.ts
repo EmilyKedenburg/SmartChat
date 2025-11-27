@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.16.0';
 import { DOMParser } from "https://deno.land/x/deno_dom/deno-dom-wasm.ts";
-import { RecursiveCharacterTextSplitter } from "https://esm.sh/@langchain/textsplitters@0.0.2"; // Updated version
+import { RecursiveCharacterTextSplitter } from "https://esm.sh/@langchain/textsplitters@0.0.10"; // Updated version
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
