@@ -7,6 +7,7 @@ import { RecursiveCharacterTextSplitter } from "https://esm.sh/@langchain/textsp
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS', // Added this line
 };
 
 // Function to fetch and extract text content from a URL
