@@ -231,9 +231,9 @@ const ChatPage = () => {
   return (
     <div className="min-h-screen flex flex-col items-center justify-between bg-gray-100 dark:bg-gray-900 p-4">
       <Card className="w-full max-w-2xl bg-white dark:bg-gray-800 shadow-lg rounded-lg flex flex-col h-[90vh]">
-        <CardHeader className="pb-4 flex items-baseline justify-center relative"> {/* Added relative and justify-center */}
+        <CardHeader className="pb-4 flex items-baseline"> {/* Changed items-center to items-baseline */}
           <CardTitle
-            className="text-3xl font-bold text-gray-900 dark:text-white" // Removed flex-grow and text-center
+            className="text-3xl font-bold text-center text-gray-900 dark:text-white flex-grow"
             style={{ color: secondaryAccentColor }}
           >
             Smart Chat
@@ -241,11 +241,7 @@ const ChatPage = () => {
           {currentChatId && (
             <Dialog open={isSourcesDialogOpen} onOpenChange={setIsSourcesDialogOpen}>
               <DialogTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="absolute right-4 top-1/2 -translate-y-1/2 dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-600" // Absolute positioning
-                >
+                <Button variant="outline" size="sm" className="ml-auto dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-600">
                   <FileText className="h-4 w-4 mr-2" /> View Sources
                 </Button>
               </DialogTrigger>
