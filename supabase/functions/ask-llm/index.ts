@@ -2,12 +2,12 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.16.0';
 import { DOMParser } from "https://deno.land/x/deno_dom/deno-dom-wasm.ts";
-import { RecursiveCharacterTextSplitter } from "https://esm.sh/@langchain/textsplitters@0.0.1"; // Corrected import path
+import { RecursiveCharacterTextSplitter } from "https://esm.sh/@langchain/textsplitters@0.0.2"; // Updated version
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS', // Added this line
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
 // Function to fetch and extract text content from a URL
