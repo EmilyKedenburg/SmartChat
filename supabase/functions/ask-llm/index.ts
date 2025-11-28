@@ -1,26 +1,70 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { GoogleGenerativeAI } from "npm:@google/generative-ai";
+import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.16.0';
 import { DOMParser } from "https://deno.land/x/deno_dom/deno-dom-wasm.ts";
-// Removed: import { RecursiveCharacterTextSplitter } from "npm:langchain/text_splitter";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-serve(async (req) => {
-  console.log(`[DEBUG] Received request: ${req.method} ${req.url}`);
+// Function to fetch and extract text content from a URL
+async function fetchUrlContent(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.warn(`Failed to fetch URL ${url}: ${response.statusText}`);
+      return null;
+    }
+    const html = await response.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    if (doc) {
+      // Extract text from common content elements, or fallback to body text
+      const contentElements = doc.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li, span");
+      let extractedText = "";
+      if (contentElements.length > 0) {
+        extractedText = Array.from(contentElements).map(el => el.textContent).join("\n");
+      } else {
+        extractedText = doc.body?.textContent || "";
+      }
+      // Basic cleanup: remove excessive whitespace and newlines
+      return extractedText.replace(/\s+/g, ' ').trim();
+    }
+    return null;
+  } catch (error) {
+    console.error(`Error fetching or parsing URL ${url}:`, error);
+    return null;
+  }
+}
 
+// Function to download file content from Supabase Storage
+async function downloadFileContent(supabaseClient: any, filePath: string): Promise<string | null> {
+  try {
+    const { data, error } = await supabaseClient.storage.from('chat-files').download(filePath);
+    if (error) {
+      console.error(`Error downloading file ${filePath}:`, error);
+      return null;
+    }
+    if (data) {
+      // Assuming text files, read as text
+      return await data.text();
+    }
+    return null;
+  } catch (error) {
+    console.error(`Error processing downloaded file ${filePath}:`, error);
+    return null;
+  }
+}
+
+serve(async (req) => {
+  // Handle CORS preflight request
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { question, sourceIds } = await req.json();
-    console.log(`[DEBUG] Question: "${question}", Source IDs: ${JSON.stringify(sourceIds)}`);
-
+    // Initialize Supabase client with the user's auth token
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
@@ -31,87 +75,105 @@ serve(async (req) => {
       }
     );
 
-    // Fetch sources from the database
+    // Verify user authentication
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) {
+      return new Response('Unauthorized', { status: 401, headers: corsHeaders });
+    }
+
+    // Parse the request body
+    const { question, sourceIds } = await req.json();
+
+    if (!question && (!sourceIds || sourceIds.length === 0)) {
+      return new Response(JSON.stringify({ error: 'Question or sources are required' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 400,
+      });
+    }
+
+    // --- LLM API call using Google Gemini ---
+    const LLM_API_KEY = Deno.env.get('LLM_API_KEY');
+    if (!LLM_API_KEY) {
+      return new Response(JSON.stringify({ error: 'LLM_API_KEY not set in Supabase secrets.' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 500,
+      });
+    }
+
+    const genAI = new GoogleGenerativeAI(LLM_API_KEY);
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
     let context = "";
+    const extractedContents: { id: string; content: string; name: string; type: string }[] = [];
+
     if (sourceIds && sourceIds.length > 0) {
-      console.log("[DEBUG] Fetching sources from database...");
-      const { data: sources, error: sourcesError } = await supabaseClient
-        .from("sources")
-        .select("id, type, name, content, storage_path")
-        .in("id", sourceIds);
+      const { data: sources, error: fetchSourcesError } = await supabaseClient
+        .from('sources')
+        .select('*')
+        .in('id', sourceIds);
 
-      if (sourcesError) {
-        console.error("[DEBUG] Error fetching sources:", sourcesError);
-        throw new Error(`Failed to fetch sources: ${sourcesError.message}`);
+      if (fetchSourcesError) {
+        console.error("Error fetching sources:", fetchSourcesError);
+        return new Response(JSON.stringify({ error: 'Failed to retrieve source information.' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 500,
+        });
       }
 
-      console.log(`[DEBUG] Found ${sources.length} sources.`);
-
-      for (const source of sources) {
-        let sourceContent = source.content;
-
-        if (source.type === "url" && !sourceContent) {
-          console.log(`[DEBUG] Scraping URL: ${source.name}`);
-          try {
-            const response = await fetch(source.name);
-            const html = await response.text();
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, "text/html");
-            sourceContent = doc?.body?.textContent || "";
-            // Update the source content in the database
-            await supabaseClient.from("sources").update({ content: sourceContent }).eq("id", source.id);
-            console.log(`[DEBUG] Successfully scraped and updated content for URL: ${source.name}`);
-          } catch (scrapeError: any) {
-            console.error(`[DEBUG] Error scraping URL ${source.name}:`, scrapeError);
-            sourceContent = `Failed to scrape content from ${source.name}.`;
-          }
-        } else if (source.storage_path && !sourceContent) {
-          console.log(`[DEBUG] Fetching file content from storage: ${source.storage_path}`);
-          try {
-            const { data: fileData, error: downloadError } = await supabaseClient.storage
-              .from("chat-files")
-              .download(source.storage_path);
-
-            if (downloadError) throw downloadError;
-
-            sourceContent = await fileData.text();
-            // Update the source content in the database
-            await supabaseClient.from("sources").update({ content: sourceContent }).eq("id", source.id);
-            console.log(`[DEBUG] Successfully fetched and updated content for file: ${source.name}`);
-          } catch (fileError: any) {
-            console.error(`[DEBUG] Error downloading file ${source.name}:`, fileError);
-            sourceContent = `Failed to download content from file ${source.name}.`;
-          }
+      for (const source of sources || []) {
+        let content: string | null = null;
+        if (source.type === 'url') {
+          content = await fetchUrlContent(source.name);
+        } else if (source.storage_path) { // Assuming files have storage_path
+          content = await downloadFileContent(supabaseClient, source.storage_path);
         }
 
-        if (sourceContent) {
-          context += `Source (${source.name}):\n${sourceContent.substring(0, 1000)}...\n\n`; // Limit context length
+        if (content) {
+          extractedContents.push({ id: source.id, content, name: source.name, type: source.type });
+          // Update the source record in the database with the extracted content
+          const { error: updateSourceError } = await supabaseClient
+            .from('sources')
+            .update({ content: content })
+            .eq('id', source.id);
+
+          if (updateSourceError) {
+            console.error(`Error updating source ${source.id} with content:`, updateSourceError);
+          }
+        } else {
+          console.warn(`Could not extract content for source ${source.id} (type: ${source.type}, name: ${source.name})`);
         }
+      }
+
+      if (extractedContents.length > 0) {
+        context += `\n\n--- Provided Context ---\n`;
+        extractedContents.forEach((item) => {
+          context += `\nSource (${item.type === 'url' ? 'URL' : 'File'}): ${item.name}\n${item.content}\n`;
+        });
+        context += `\n-------------------------\n`;
+      } else {
+        context += `\n\n--- Provided Context ---\n`;
+        context += `No readable content was extracted from the provided sources.\n`;
+        context += `\n-------------------------\n`;
       }
     }
 
-    console.log("[DEBUG] Initializing Google Generative AI...");
-    const client = new GoogleGenerativeAI(Deno.env.get("GOOGLE_API_KEY") ?? '');
-    const model = client.getGenerativeModel({ model: "gemini-1.5-pro" });
+    const prompt = `You are a helpful assistant that answers questions based on provided context.
+    ${context}
+    
+    Question: ${question}
+    
+    Please provide a concise and helpful answer. If you directly reference information from the provided URLs or files, try to cite the source in your response.`;
 
-    let prompt = `You are a helpful AI assistant. Answer the following question.`;
-    if (context) {
-      prompt += ` Use the following context to answer the question:\n\n${context}\n\n`;
-    }
-    prompt += `Question: ${question}`;
-
-    console.log("[DEBUG] Sending prompt to LLM...");
     const result = await model.generateContent(prompt);
     const response = await result.response;
-    const text = response.text();
-    console.log("[DEBUG] LLM Response received.");
+    const assistantResponse = response.text();
 
-    return new Response(JSON.stringify({ response: text }), {
+    return new Response(JSON.stringify({ response: assistantResponse }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
   } catch (error: any) {
-    console.error('[DEBUG] Edge Function error:', error);
+    console.error('Edge Function error:', error);
     return new Response(JSON.stringify({ error: error.message || 'Internal Server Error' }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
