@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { GoogleGenerativeAI } from "npm:@google/generative-ai"; // Corrected import
+import { GoogleGenerativeAI } from "npm:@google/generative-ai"; // Correct import
 import { DOMParser } from "https://deno.land/x/deno_dom/deno-dom-wasm.ts";
 import { RecursiveCharacterTextSplitter } from "npm:langchain/text_splitter";
 
@@ -91,8 +91,8 @@ serve(async (req) => {
     }
 
     console.log("[DEBUG] Initializing Google Generative AI...");
-    const genAI = new GoogleGenerativeAI(Deno.env.get("GOOGLE_API_KEY")!); // Changed to GOOGLE_API_KEY
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" }); // Changed model to gemini-1.5-pro
+    const client = new GoogleGenerativeAI(Deno.env.get("GOOGLE_API_KEY")); // Changed variable name to client and removed '!'
+    const model = client.getGenerativeModel({ model: "gemini-1.5-pro" }); // Confirmed model to gemini-1.5-pro
 
     let prompt = `You are a helpful AI assistant. Answer the following question.`;
     if (context) {
