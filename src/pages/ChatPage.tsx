@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MadeWithDyad } from "@/components/made-with-dyad";
-import { X, Send, Loader2, FileText } from "lucide-react";
+import { X, Send, Loader2, FileText, LogOut } from "lucide-react"; // Added LogOut icon
 import { useNavigate } from "react-router-dom";
 import { useSession } from "@/providers/SessionContextProvider";
 import { supabase } from "@/integrations/supabase/client";
@@ -15,7 +15,7 @@ import { showSuccess, showError } from "@/utils/toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import SourceDisplay from "@/components/SourceDisplay"; // Import the new component
+import SourceDisplay from "@/components/SourceDisplay";
 
 interface Message {
   id: string;
@@ -42,7 +42,7 @@ const ChatPage = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [isLoadingResponse, setIsLoadingResponse] = useState<boolean>(false);
-  const [isSourcesDialogOpen, setIsSourcesDialogOpen] = useState(false); // State for dialog
+  const [isSourcesDialogOpen, setIsSourcesDialogOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -87,6 +87,19 @@ const ChatPage = () => {
 
   const handleRemoveUrl = (index: number) => {
     setUrls(urls.filter((_, i) => i !== index));
+  };
+
+  const handleLogout = async () => {
+    setIsLoadingResponse(true); // Disable inputs during logout
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      console.error("Error logging out:", error);
+      showError("Failed to log out.");
+    } else {
+      showSuccess("Logged out successfully!");
+      navigate("/login"); // Redirect to login page after logout
+    }
+    setIsLoadingResponse(false);
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -231,32 +244,43 @@ const ChatPage = () => {
   return (
     <div className="min-h-screen flex flex-col items-center justify-between bg-gray-100 dark:bg-gray-900 p-4">
       <Card className="w-full max-w-2xl bg-white dark:bg-gray-800 shadow-lg rounded-lg flex flex-col h-[90vh]">
-        <CardHeader className="pb-4 relative flex items-center justify-center"> {/* Added relative, flex, items-center, justify-center */}
+        <CardHeader className="pb-4 relative flex items-center justify-between"> {/* Changed to justify-between */}
           <CardTitle
-            className="text-3xl font-bold text-gray-900 dark:text-white" // Removed flex-grow and text-center from here
+            className="text-3xl font-bold text-gray-900 dark:text-white"
             style={{ color: secondaryAccentColor }}
           >
             Smart Chat
           </CardTitle>
-          {currentChatId && (
-            <Dialog open={isSourcesDialogOpen} onOpenChange={setIsSourcesDialogOpen}>
-              <DialogTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="absolute right-4 top-1/2 -translate-y-1/2 dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-600" // Absolute positioning
-                >
-                  <FileText className="h-4 w-4 mr-2" /> View Sources
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto dark:bg-gray-800">
-                <DialogHeader>
-                  <DialogTitle className="text-gray-900 dark:text-white">Chat Sources</DialogTitle>
-                </DialogHeader>
-                <SourceDisplay chatId={currentChatId} />
-              </DialogContent>
-            </Dialog>
-          )}
+          <div className="flex items-center space-x-2"> {/* Container for buttons */}
+            {currentChatId && (
+              <Dialog open={isSourcesDialogOpen} onOpenChange={setIsSourcesDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-600"
+                  >
+                    <FileText className="h-4 w-4 mr-2" /> View Sources
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto dark:bg-gray-800">
+                  <DialogHeader>
+                    <DialogTitle className="text-gray-900 dark:text-white">Chat Sources</DialogTitle>
+                  </DialogHeader>
+                  <SourceDisplay chatId={currentChatId} />
+                </DialogContent>
+              </Dialog>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleLogout}
+              className="dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-600"
+              disabled={isLoadingResponse}
+            >
+              <LogOut className="h-4 w-4 mr-2" /> Logout
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="flex-grow flex flex-col p-0">
           {/* Message Display Area */}
