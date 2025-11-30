@@ -81,8 +81,8 @@ serve(async (req) => {
       return new Response('Unauthorized', { status: 401, headers: corsHeaders });
     }
 
-    // Parse the request body
-    const { question, sourceIds } = await req.json();
+    // Parse the request body, now including 'messages' for conversational memory
+    const { question, sourceIds, messages: conversationHistory } = await req.json();
 
     if (!question && (!sourceIds || sourceIds.length === 0)) {
       return new Response(JSON.stringify({ error: 'Question or sources are required' }), {
@@ -157,7 +157,17 @@ serve(async (req) => {
       }
     }
 
-    const prompt = `You are a helpful assistant that answers questions based on provided context.
+    let chatHistory = "";
+    if (conversationHistory && conversationHistory.length > 0) {
+      chatHistory += "\n\n--- Conversation History ---\n";
+      conversationHistory.forEach((msg: { role: string; content: string }) => {
+        chatHistory += `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}\n`;
+      });
+      chatHistory += "----------------------------\n";
+    }
+
+    const prompt = `You are a helpful assistant that answers questions based on provided context and conversation history.
+    ${chatHistory}
     ${context}
     
     Question: ${question}

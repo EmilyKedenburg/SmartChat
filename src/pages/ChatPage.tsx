@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MadeWithDyad } from "@/components/made-with-dyad";
-import { X, Send, Loader2, FileText, LogOut } from "lucide-react"; // Added LogOut icon
+import { X, Send, Loader2, FileText, LogOut } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "@/providers/SessionContextProvider";
 import { supabase } from "@/integrations/supabase/client";
@@ -195,9 +195,19 @@ const ChatPage = () => {
         }
       }
 
-      // Invoke Edge Function with question and source IDs
+      // Prepare conversation history for the LLM (last 10 messages)
+      const conversationHistoryForLLM = messages.slice(-10).map(msg => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+
+      // Invoke Edge Function with question, source IDs, and conversation history
       const { data, error: edgeFunctionError } = await supabase.functions.invoke("ask-llm", {
-        body: { question: trimmedQuestion, sourceIds: sourceIds },
+        body: {
+          question: trimmedQuestion,
+          sourceIds: sourceIds,
+          messages: conversationHistoryForLLM, // Pass the conversation history
+        },
       });
 
       if (edgeFunctionError) throw edgeFunctionError;
@@ -244,14 +254,14 @@ const ChatPage = () => {
   return (
     <div className="min-h-screen flex flex-col items-center justify-between bg-gray-100 dark:bg-gray-900 p-4">
       <Card className="w-full max-w-2xl bg-white dark:bg-gray-800 shadow-lg rounded-lg flex flex-col h-[90vh]">
-        <CardHeader className="pb-4 relative flex items-center justify-between"> {/* Changed to justify-between */}
+        <CardHeader className="pb-4 relative flex items-center justify-between">
           <CardTitle
             className="text-3xl font-bold text-gray-900 dark:text-white"
             style={{ color: secondaryAccentColor }}
           >
             Smart Chat
           </CardTitle>
-          <div className="flex items-center space-x-2"> {/* Container for buttons */}
+          <div className="flex items-center space-x-2">
             {currentChatId && (
               <Dialog open={isSourcesDialogOpen} onOpenChange={setIsSourcesDialogOpen}>
                 <DialogTrigger asChild>
@@ -327,7 +337,7 @@ const ChatPage = () => {
                   )}
                 </div>
               ))}
-              {messages.length > 0 && <div ref={messagesEndRef} />} {/* Conditionally render messagesEndRef */}
+              {messages.length > 0 && <div ref={messagesEndRef} />}
             </div>
           </ScrollArea>
 
