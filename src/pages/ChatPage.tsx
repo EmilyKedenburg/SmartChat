@@ -119,8 +119,10 @@ const ChatPage = () => {
 
     try {
       let currentChat = currentChatId;
+      let allSourceIdsForLLM: string[] = [];
+
       if (!currentChat) {
-        // Create a new chat
+        // Create a new chat if it's the first message
         const { data: newChat, error: chatError } = await supabase
           .from("chats")
           .insert({ user_id: userId, title: trimmedQuestion.substring(0, 50) || "New Chat" })
@@ -130,6 +132,21 @@ const ChatPage = () => {
         if (chatError) throw chatError;
         currentChat = newChat.id;
         setCurrentChatId(newChat.id);
+      } else {
+        // For existing chat, fetch all existing sources
+        const { data: existingSources, error: fetchExistingSourcesError } = await supabase
+          .from("sources")
+          .select("id")
+          .eq("chat_id", currentChat)
+          .eq("user_id", userId);
+
+        if (fetchExistingSourcesError) {
+          console.error("Error fetching existing sources:", fetchExistingSourcesError);
+          showError("Failed to retrieve existing sources for this chat.");
+          // Continue without existing sources if there's an error
+        } else {
+          allSourceIdsForLLM = existingSources?.map(s => s.id) || [];
+        }
       }
 
       // Add user message to state and database
@@ -146,9 +163,7 @@ const ChatPage = () => {
         .insert({ chat_id: currentChat, user_id: userId, content: trimmedQuestion, role: "user" });
       if (insertUserMessageError) throw insertUserMessageError;
 
-      const sourceIds: string[] = [];
-
-      // Handle file uploads to Supabase Storage and create source entries
+      // Handle new file uploads to Supabase Storage and create source entries
       for (const file of files) {
         const filePath = `${userId}/${currentChat}/${file.name}`;
         const { data: uploadData, error: uploadError } = await supabase.storage
@@ -175,11 +190,11 @@ const ChatPage = () => {
           console.error("Error inserting file source:", insertSourceError);
           showError(`Failed to record file source ${file.name}: ${insertSourceError.message}`);
         } else if (sourceData) {
-          sourceIds.push(sourceData.id);
+          allSourceIdsForLLM.push(sourceData.id);
         }
       }
 
-      // Handle URLs as sources
+      // Handle new URLs as sources
       for (const url of filteredUrls) {
         const { data: sourceData, error: insertSourceError } = await supabase
           .from("sources")
@@ -191,9 +206,12 @@ const ChatPage = () => {
           console.error("Error inserting URL source:", insertSourceError);
           showError(`Failed to record URL source ${url}: ${insertSourceError.message}`);
         } else if (sourceData) {
-          sourceIds.push(sourceData.id);
+          allSourceIdsForLLM.push(sourceData.id);
         }
       }
+
+      // Remove duplicates from allSourceIdsForLLM if any
+      allSourceIdsForLLM = Array.from(new Set(allSourceIdsForLLM));
 
       // Prepare conversation history for the LLM (last 10 messages)
       const conversationHistoryForLLM = messages.slice(-10).map(msg => ({
@@ -201,12 +219,12 @@ const ChatPage = () => {
         content: msg.content,
       }));
 
-      // Invoke Edge Function with question, source IDs, and conversation history
+      // Invoke Edge Function with question, all relevant source IDs, and conversation history
       const { data, error: edgeFunctionError } = await supabase.functions.invoke("ask-llm", {
         body: {
           question: trimmedQuestion,
-          sourceIds: sourceIds,
-          messages: conversationHistoryForLLM, // Pass the conversation history
+          sourceIds: allSourceIdsForLLM, // Pass the combined list of source IDs
+          messages: conversationHistoryForLLM,
         },
       });
 
