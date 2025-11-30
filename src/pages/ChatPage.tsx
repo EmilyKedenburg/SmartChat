@@ -310,7 +310,8 @@ const ChatPage = () => {
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="flex-grow flex flex-col p-0">
+        {/* Replaced CardContent with a div to better control flex layout */}
+        <div className="flex-grow flex flex-col overflow-hidden">
           {/* Message Display Area */}
           <ScrollArea className="flex-grow px-6 pt-6 pb-4 border-t border-b dark:border-gray-700">
             <div className="space-y-4">
@@ -323,13 +324,21 @@ const ChatPage = () => {
                 <div
                   key={msg.id}
                   className={`flex items-start gap-3 ${
-                    msg.role === "user" ? "justify-end" : "justify-start"
+                    msg.role === "user" ? "justify-end flex-row-reverse" : "justify-start"
                   }`}
                 >
                   {msg.role === "assistant" && (
                     <Avatar>
                       <AvatarImage src="/placeholder.svg" alt="Assistant" />
                       <AvatarFallback style={{ backgroundColor: secondaryAccentColor, color: primaryAccentColor }}>AI</AvatarFallback>
+                    </Avatar>
+                  )}
+                  {msg.role === "user" && (
+                    <Avatar>
+                      <AvatarImage src="/placeholder.svg" alt="User" />
+                      <AvatarFallback style={{ backgroundColor: primaryAccentColor, color: secondaryAccentColor }}>
+                        {session?.user?.email ? session.user.email[0].toUpperCase() : "U"}
+                      </AvatarFallback>
                     </Avatar>
                   )}
                   <div
@@ -345,14 +354,6 @@ const ChatPage = () => {
                       {new Date(msg.created_at).toLocaleTimeString()}
                     </p>
                   </div>
-                  {msg.role === "user" && (
-                    <Avatar>
-                      <AvatarImage src="/placeholder.svg" alt="User" />
-                      <AvatarFallback style={{ backgroundColor: primaryAccentColor, color: secondaryAccentColor }}>
-                        {session?.user?.email ? session.user.email[0].toUpperCase() : "U"}
-                      </AvatarFallback>
-                    </Avatar>
-                  )}
                 </div>
               ))}
               {messages.length > 0 && <div ref={messagesEndRef} />}
@@ -360,7 +361,7 @@ const ChatPage = () => {
           </ScrollArea>
 
           {/* Input Form */}
-          <form onSubmit={handleSubmit} className="p-6 space-y-4 border-t dark:border-gray-700">
+          <form onSubmit={handleSubmit} className="p-6 space-y-4 border-t dark:border-gray-700 flex-shrink-0">
             {/* Question Input */}
             <div>
               <Label htmlFor="question" className="sr-only">
@@ -464,7 +465,7 @@ const ChatPage = () => {
               )}
             </Button>
           </form>
-        </CardContent>
+        </div>
       </Card>
       <MadeWithDyad />
     </div>
