@@ -310,7 +310,6 @@ const ChatPage = () => {
             </Button>
           </div>
         </CardHeader>
-        {/* Replaced CardContent with a div to better control flex layout */}
         <div className="flex-grow flex flex-col overflow-hidden">
           {/* Message Display Area */}
           <ScrollArea className="flex-grow px-6 pt-6 pb-4 border-t border-b dark:border-gray-700">
@@ -324,21 +323,13 @@ const ChatPage = () => {
                 <div
                   key={msg.id}
                   className={`flex items-start gap-3 ${
-                    msg.role === "user" ? "justify-end flex-row-reverse" : "justify-start"
+                    msg.role === "user" ? "justify-end" : "justify-start" // Removed flex-row-reverse
                   }`}
                 >
                   {msg.role === "assistant" && (
                     <Avatar>
                       <AvatarImage src="/placeholder.svg" alt="Assistant" />
                       <AvatarFallback style={{ backgroundColor: secondaryAccentColor, color: primaryAccentColor }}>AI</AvatarFallback>
-                    </Avatar>
-                  )}
-                  {msg.role === "user" && (
-                    <Avatar>
-                      <AvatarImage src="/placeholder.svg" alt="User" />
-                      <AvatarFallback style={{ backgroundColor: primaryAccentColor, color: secondaryAccentColor }}>
-                        {session?.user?.email ? session.user.email[0].toUpperCase() : "U"}
-                      </AvatarFallback>
                     </Avatar>
                   )}
                   <div
@@ -354,6 +345,14 @@ const ChatPage = () => {
                       {new Date(msg.created_at).toLocaleTimeString()}
                     </p>
                   </div>
+                  {msg.role === "user" && ( // Moved user avatar to be rendered AFTER the message bubble in JSX
+                    <Avatar>
+                      <AvatarImage src="/placeholder.svg" alt="User" />
+                      <AvatarFallback style={{ backgroundColor: primaryAccentColor, color: secondaryAccentColor }}>
+                        {session?.user?.email ? session.user.email[0].toUpperCase() : "U"}
+                      </AvatarFallback>
+                    </Avatar>
+                  )}
                 </div>
               ))}
               {messages.length > 0 && <div ref={messagesEndRef} />}
