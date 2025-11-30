@@ -328,7 +328,7 @@ const ChatPage = () => {
             {/* File Upload */}
             <div>
               <Label htmlFor="file-upload" className="text-sm font-medium mb-2 block">
-                Upload Files (Text files recommended for direct processing)
+                Upload Files (Supported: .txt, .pdf, .docx, .csv)
               </Label>
               <Input
                 id="file-upload"
