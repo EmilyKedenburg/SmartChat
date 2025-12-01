@@ -1,11 +1,17 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { PDFDocument } from "https://deno.land/x/pdf_reader@v0.1.0/mod.ts"; // Using a Deno-native PDF reader
+// Import pdfjs-dist and its types from esm.sh
+import * as pdfjsLib from 'https://esm.sh/pdfjs-dist@4.4.168';
+import { TextItem } from 'https://esm.sh/pdfjs-dist@4.4.168/types/src/display/api'; // Import TextItem type
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// IMPORTANT: Disable web workers for pdfjs-dist in Deno environment
+// This forces PDF.js to run in the main thread, avoiding worker module loading issues.
+pdfjsLib.GlobalWorkerOptions.workerSrc = '';
 
 serve(async (req) => {
   // Handle CORS preflight request
@@ -75,13 +81,16 @@ serve(async (req) => {
       });
     }
 
-    // Extract text using deno-pdf-reader
+    // Extract text using pdfjs-dist
     const arrayBuffer = await fileData.arrayBuffer();
-    const pdfDoc = await PDFDocument.load(arrayBuffer);
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdfDocument = await loadingTask.promise;
     let extractedText = "";
-    for (const page of pdfDoc.getPages()) {
-      // This is a basic text extraction. More complex PDFs might require advanced logic.
-      extractedText += page.getTextContent().items.map((item: any) => item.str).join(" ") + "\n";
+
+    for (let i = 1; i <= pdfDocument.numPages; i++) {
+      const page = await pdfDocument.getPage(i);
+      const textContent = await page.getTextContent();
+      extractedText += textContent.items.map((item: TextItem) => item.str).join(' ') + '\n';
     }
     extractedText = extractedText.replace(/\s+/g, ' ').trim();
 
