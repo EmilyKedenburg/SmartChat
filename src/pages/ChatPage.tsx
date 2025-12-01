@@ -17,6 +17,13 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import SourceDisplay from "@/components/SourceDisplay";
 
+// PDF.js imports for client-side
+import * as pdfjsLib from "pdfjs-dist";
+import { GlobalWorkerOptions } from "pdfjs-dist/build/pdf";
+// Set workerSrc for client-side PDF.js
+GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+
+
 interface Message {
   id: string;
   content: string;
@@ -24,12 +31,10 @@ interface Message {
   created_at: string;
 }
 
-interface Source {
-  id: string;
-  type: string;
-  name: string;
-  content?: string;
-  storage_path?: string;
+interface ProcessedFile extends File {
+  extractedContent?: string;
+  isProcessing?: boolean;
+  extractionError?: string;
 }
 
 const ChatPage = () => {
@@ -37,7 +42,7 @@ const ChatPage = () => {
   const navigate = useNavigate();
 
   const [question, setQuestion] = useState<string>("");
-  const [files, setFiles] = useState<File[]>([]);
+  const [processedFiles, setProcessedFiles] = useState<ProcessedFile[]>([]);
   const [urls, setUrls] = useState<string[]>([""]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
@@ -65,14 +70,76 @@ const ChatPage = () => {
     setQuestion(e.target.value);
   };
 
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const extractPdfContentFromBuffer = async (arrayBuffer: ArrayBuffer): Promise<string | null> => {
+    try {
+      const uint8 = new Uint8Array(arrayBuffer);
+      const pdf = await pdfjsLib.getDocument({ data: uint8 }).promise;
+      let extractedText = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items.map((item: any) => item.str).join(" ");
+        extractedText += pageText + "\n\n";
+      }
+      return extractedText.replace(/\s+/g, ' ').trim();
+    } catch (error) {
+      console.error("Error extracting PDF content:", error);
+      return null;
+    }
+  };
+
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      setFiles(Array.from(e.target.files));
+      const newFiles = Array.from(e.target.files);
+      const filesToProcess: ProcessedFile[] = newFiles.map(file => ({ ...file, isProcessing: false }));
+      setProcessedFiles(prev => [...prev, ...filesToProcess]);
+
+      const processingPromises = filesToProcess.map(async (file, index) => {
+        const updatedFile = { ...file };
+        if (file.type === 'application/pdf') {
+          updatedFile.isProcessing = true;
+          setProcessedFiles(prev => prev.map(f => f === file ? updatedFile : f)); // Update processing state
+          try {
+            const arrayBuffer = await file.arrayBuffer();
+            updatedFile.extractedContent = await extractPdfContentFromBuffer(arrayBuffer);
+            if (updatedFile.extractedContent) {
+              showSuccess(`PDF content extracted from ${file.name}.`);
+            } else {
+              updatedFile.extractionError = `Failed to extract content from ${file.name}.`;
+              showError(`Failed to extract PDF content from ${file.name}.`);
+            }
+          } catch (error: any) {
+            console.error(`Error extracting PDF content from ${file.name}:`, error);
+            updatedFile.extractionError = `Failed to extract PDF content: ${error.message}`;
+            showError(`Failed to extract PDF content from ${file.name}.`);
+          } finally {
+            updatedFile.isProcessing = false;
+            setProcessedFiles(prev => prev.map(f => f === file ? updatedFile : f)); // Update final state
+          }
+        } else if (file.type.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv')) {
+          try {
+            updatedFile.extractedContent = await file.text();
+            showSuccess(`Text file ${file.name} content read.`);
+          } catch (error: any) {
+            console.error(`Error reading text file ${file.name}:`, error);
+            updatedFile.extractionError = `Failed to read text file content: ${error.message}`;
+            showError(`Failed to read text file content from ${file.name}.`);
+          }
+          setProcessedFiles(prev => prev.map(f => f === file ? updatedFile : f)); // Update final state
+        } else {
+          updatedFile.extractionError = `Unsupported file type for extraction: ${file.name}.`;
+          showError(`Unsupported file type for extraction: ${file.name}.`);
+          setProcessedFiles(prev => prev.map(f => f === file ? updatedFile : f)); // Update final state
+        }
+        return updatedFile;
+      });
+
+      await Promise.all(processingPromises);
     }
   };
 
   const handleRemoveFile = (index: number) => {
-    setFiles(files.filter((_, i) => i !== index));
+    setProcessedFiles(processedFiles.filter((_, i) => i !== index));
   };
 
   const handleUrlChange = (index: number, value: string) => {
@@ -109,8 +176,9 @@ const ChatPage = () => {
     const userId = session.user.id;
     const trimmedQuestion = question.trim();
     const filteredUrls = urls.filter(url => url.trim() !== "");
+    const validFiles = processedFiles.filter(file => !file.extractionError);
 
-    if (!trimmedQuestion && files.length === 0 && filteredUrls.length === 0) {
+    if (!trimmedQuestion && validFiles.length === 0 && filteredUrls.length === 0) {
       showError("Please provide a question, files, or URLs.");
       return;
     }
@@ -164,7 +232,7 @@ const ChatPage = () => {
       if (insertUserMessageError) throw insertUserMessageError;
 
       // Handle new file uploads to Supabase Storage and create source entries
-      const fileProcessingPromises = files.map(async (file) => {
+      const fileProcessingPromises = validFiles.map(async (file) => {
         const filePath = `${userId}/${currentChat}/${file.name}`;
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from("chat-files")
@@ -187,17 +255,17 @@ const ChatPage = () => {
             .from("chat-files")
             .createSignedUrl(filePath, 3600); // URL valid for 1 hour
 
-          if (signedUrlError || !signedUrlData?.signedUrl) { // Corrected from signedId to signedUrl
+          if (signedUrlError || !signedUrlData?.signedUrl) {
             console.error("Error generating signed URL for PDF:", signedUrlError);
             showError(`Failed to generate URL for PDF ${file.name}.`);
             return null;
           }
           const signedUrl = signedUrlData.signedUrl;
 
-          // Insert source entry as type 'url' with the signed URL
+          // Insert source entry as type 'url' with the signed URL and pre-extracted content
           const { data: sourceData, error: insertSourceError } = await supabase
             .from("sources")
-            .insert({ chat_id: currentChat, user_id: userId, type: "url", name: signedUrl, storage_path: filePath }) // Keep storage_path for download in SourceDisplay
+            .insert({ chat_id: currentChat, user_id: userId, type: "url", name: signedUrl, content: file.extractedContent, storage_path: filePath })
             .select("id")
             .single();
 
@@ -235,14 +303,23 @@ const ChatPage = () => {
             showError(`No content extracted from DOCX ${file.name}.`);
           } else {
             showSuccess(`DOCX content extracted and saved for ${file.name}.`);
+            // Update the source with extracted content
+            const { error: updateContentError } = await supabase
+              .from("sources")
+              .update({ content: extractedContent })
+              .eq("id", sourceData.id);
+            if (updateContentError) {
+              console.error(`Error updating source ${sourceData.id} with DOCX content:`, updateContentError);
+              showError(`Failed to save extracted content for ${file.name}.`);
+            }
           }
           sourceIdToReturn = sourceData.id;
 
         } else if (file.type.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv')) {
-          // Existing text file logic
+          // Existing text file logic, now using pre-extracted content
           const { data: sourceData, error: insertSourceError } = await supabase
             .from("sources")
-            .insert({ chat_id: currentChat, user_id: userId, type: file.type, name: file.name, storage_path: filePath })
+            .insert({ chat_id: currentChat, user_id: userId, type: file.type, name: file.name, storage_path: filePath, content: file.extractedContent })
             .select("id")
             .single();
 
@@ -252,27 +329,11 @@ const ChatPage = () => {
             return null;
           }
 
-          showSuccess(`Text file ${file.name} uploaded. Content will be processed by AI.`);
-          try {
-            const extractedContent = await file.text();
-            const { error: updateContentError } = await supabase
-              .from("sources")
-              .update({ content: extractedContent })
-              .eq("id", sourceData.id);
-            if (updateContentError) {
-              console.error(`Error updating source ${sourceData.id} with text content:`, updateContentError);
-              showError(`Failed to save content for ${file.name}.`);
-              return null;
-            }
-          } catch (readError: any) {
-            console.error(`Error reading text file ${file.name}:`, readError);
-            showError(`Failed to read content from ${file.name}.`);
-            return null;
-          }
+          showSuccess(`Text file ${file.name} uploaded with content.`);
           sourceIdToReturn = sourceData.id;
 
         } else {
-          showError(`Unsupported file type for extraction: ${file.name}.`);
+          showError(`Unsupported file type for upload: ${file.name}.`);
           return null; // Do not add source if type is unsupported
         }
         
@@ -339,7 +400,7 @@ const ChatPage = () => {
       if (insertAssistantMessageError) throw insertAssistantMessageError;
 
       setQuestion("");
-      setFiles([]);
+      setProcessedFiles([]); // Clear processed files after submission
       setUrls([""]);
       showSuccess("Response received!");
 
@@ -482,16 +543,20 @@ const ChatPage = () => {
                 disabled={isLoadingResponse}
               />
               <div className="mt-2 space-y-1">
-                {files.map((file, index) => (
+                {processedFiles.map((file, index) => (
                   <div key={index} className="flex items-center justify-between bg-gray-50 dark:bg-gray-700 p-2 rounded-md">
-                    <span className="text-sm text-gray-700 dark:text-gray-300">{file.name}</span>
+                    <span className="text-sm text-gray-700 dark:text-gray-300">
+                      {file.name}
+                      {file.isProcessing && <Loader2 className="ml-2 h-4 w-4 animate-spin inline-block" />}
+                      {file.extractionError && <span className="ml-2 text-red-500 text-xs">({file.extractionError})</span>}
+                    </span>
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
                       onClick={() => handleRemoveFile(index)}
                       className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                      disabled={isLoadingResponse}
+                      disabled={isLoadingResponse || file.isProcessing}
                     >
                       <X className="h-4 w-4" />
                     </Button>
@@ -540,7 +605,7 @@ const ChatPage = () => {
               type="submit"
               className="w-full py-3 text-lg font-semibold"
               style={{ backgroundColor: primaryAccentColor, color: "#030816" }}
-              disabled={isLoadingResponse}
+              disabled={isLoadingResponse || processedFiles.some(f => f.isProcessing)}
             >
               {isLoadingResponse ? (
                 <>

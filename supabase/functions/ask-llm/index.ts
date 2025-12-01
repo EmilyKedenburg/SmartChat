@@ -4,36 +4,14 @@ import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.16.0'
 import { DOMParser } from "https://deno.land/x/deno_dom/deno-dom-wasm.ts";
 import type { Part } from 'https://esm.sh/@google/generative-ai@0.16.0';
 
-// PDF.js imports for Deno
-import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.3.136/build/pdf.mjs";
-// Set workerSrc to a dummy data URL to satisfy pdfjs-dist's requirement without loading an external worker.
-pdfjsLib.GlobalWorkerOptions.workerSrc = `data:application/javascript;base64,${btoa('self.onmessage = () => {};')}`;
+// Removed PDF.js imports and worker configuration as PDF extraction is now client-side.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Helper to extract text from PDF ArrayBuffer
-async function extractPdfContentFromBuffer(arrayBuffer: ArrayBuffer): Promise<string | null> {
-  try {
-    const uint8 = new Uint8Array(arrayBuffer);
-    const pdf = await pdfjsLib.getDocument({ data: uint8 }).promise;
-    let extractedText = "";
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      const pageText = content.items.map((item: any) => item.str).join(" ");
-      extractedText += pageText + "\n\n";
-    }
-    return extractedText.replace(/\s+/g, ' ').trim();
-  } catch (error) {
-    console.error("Error extracting PDF content:", error);
-    return null;
-  }
-}
-
-// Function to fetch and extract text content from a URL, now handling PDFs
+// Function to fetch and extract text content from a URL (now only for HTML/text URLs)
 async function fetchAndExtractUrlContent(url: string): Promise<string | null> {
   try {
     const response = await fetch(url);
@@ -44,10 +22,8 @@ async function fetchAndExtractUrlContent(url: string): Promise<string | null> {
 
     const contentType = response.headers.get("Content-Type");
 
-    if (contentType?.includes("application/pdf") || url.toLowerCase().endsWith(".pdf")) {
-      const arrayBuffer = await response.arrayBuffer();
-      return await extractPdfContentFromBuffer(arrayBuffer);
-    } else if (contentType?.includes("text/html")) {
+    // Only process HTML and plain text URLs here. PDFs are handled client-side.
+    if (contentType?.includes("text/html")) {
       const html = await response.text();
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, "text/html");
@@ -65,8 +41,8 @@ async function fetchAndExtractUrlContent(url: string): Promise<string | null> {
     } else if (contentType?.includes("text/plain") || contentType?.includes("text/csv")) {
       return await response.text();
     } else {
-      console.warn(`Unsupported content type for URL ${url}: ${contentType}`);
-      return null;
+      console.warn(`Unsupported content type for URL ${url} in Edge Function: ${contentType}. Assuming content is pre-extracted or not needed.`);
+      return null; // For other types, assume content is pre-extracted or not relevant for direct fetching here.
     }
   } catch (error) {
     console.error(`Error fetching or parsing URL ${url}:`, error);
@@ -148,10 +124,12 @@ serve(async (req) => {
 
       parts.push({ text: "\n--- Provided Context ---" });
       for (const source of sources || []) {
-        let content = source.content; // Assume content is pre-extracted for files or fetched for URLs
+        let content = source.content; // This will now contain pre-extracted PDF content if available
 
         if (source.type === 'url') {
-          if (!content) { // If content not already extracted, fetch and extract it
+          // If it's a URL, and content is not already present (e.g., for non-PDF URLs), fetch it.
+          // For PDFs, content should already be in `source.content` from client-side extraction.
+          if (!content) {
             content = await fetchAndExtractUrlContent(source.name);
             if (content) {
               const { error: updateSourceError } = await supabaseClient
@@ -168,14 +146,13 @@ serve(async (req) => {
             parts.push({ text: `Warning: Could not access URL source ${source.name}.` });
           }
         } else if (source.storage_path) { // For file types (txt, csv, docx)
-          // For file types, content should ideally be pre-extracted by dedicated functions (e.g., extract-docx)
-          // or read client-side (for text files). If not, it's a fallback.
+          // For file types, content should either be pre-extracted client-side (for text/csv)
+          // or extracted by a dedicated Edge Function (for docx).
+          // If content is still missing, it's a fallback.
           if (!content) {
             // This block is primarily for simple text files if content wasn't read client-side
             // or if extract-docx failed to update content.
-            // For PDFs, they are now handled as 'url' type.
             if (source.type.startsWith('text/') || source.name.endsWith('.txt') || source.name.endsWith('.csv')) {
-              // If content is still missing for a simple text file, try to download and process
               try {
                 const { data: fileData, error: downloadError } = await supabaseClient.storage.from('chat-files').download(source.storage_path);
                 if (downloadError) throw downloadError;
