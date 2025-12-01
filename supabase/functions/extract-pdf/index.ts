@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 // Roll back to pdfjs-dist 3.x which supports worker-less mode
-import { getDocument, GlobalWorkerOptions } from 'https://esm.sh/pdfjs-dist@3.10.111/build/pdf.mjs';
+import * as pdfjsLib from 'https://esm.sh/pdfjs-dist@3.10.111/build/pdf.mjs';
 import type { TextItem } from 'https://esm.sh/pdfjs-dist@3.10.111/types/src/display/api';
 
 const corsHeaders = {
@@ -11,8 +11,9 @@ const corsHeaders = {
 
 // IMPORTANT: Set workerSrc to an empty string for pdfjs-dist 3.x to enable worker-less mode.
 // This is crucial for Deno Edge Functions where web workers are not directly supported in the same way as browsers.
-GlobalWorkerOptions.workerSrc = '';
-console.log("extract-pdf: GlobalWorkerOptions.workerSrc set to empty string for pdfjs-dist 3.x.");
+// Access GlobalWorkerOptions from the imported pdfjsLib object.
+pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+console.log("extract-pdf: pdfjsLib.GlobalWorkerOptions.workerSrc set to empty string for pdfjs-dist 3.x.");
 
 serve(async (req) => {
   // Handle CORS preflight request
@@ -94,7 +95,8 @@ serve(async (req) => {
     // Extract text using pdfjs-dist
     const arrayBuffer = await fileData.arrayBuffer();
     console.log("extract-pdf: Starting PDF text extraction...");
-    const loadingTask = getDocument({ data: arrayBuffer }); // Use getDocument directly
+    // Use getDocument from the imported pdfjsLib object
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
     console.log("extract-pdf: PDF loading task created.");
     const pdfDocument = await loadingTask.promise;
     console.log(`extract-pdf: PDF document loaded. Has ${pdfDocument.numPages} pages.`);
