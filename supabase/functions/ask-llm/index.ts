@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.16.0';
 import { DOMParser } from "https://deno.land/x/deno_dom/deno-dom-wasm.ts";
+import { PDFDocument } from 'https://deno.land/x/pdf@v0.1.2/mod.ts'; // NEW IMPORT for PDF parsing
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -38,21 +39,38 @@ async function fetchUrlContent(url: string): Promise<string | null> {
   }
 }
 
-// Function to download file content from Supabase Storage
-async function downloadFileContent(supabaseClient: any, filePath: string): Promise<string | null> {
+// MODIFIED: Function to download file content from Supabase Storage and parse based on type
+async function processFileContent(supabaseClient: any, filePath: string, fileType: string): Promise<string | null> {
   try {
     const { data, error } = await supabaseClient.storage.from('chat-files').download(filePath);
     if (error) {
       console.error(`Error downloading file ${filePath}:`, error);
       return null;
     }
-    if (data) {
-      // Assuming text files, read as text
-      return await data.text();
+    if (!data) {
+      return null;
     }
-    return null;
+
+    if (fileType === 'application/pdf') {
+      // Handle PDF parsing
+      const arrayBuffer = await data.arrayBuffer();
+      const pdfDoc = await PDFDocument.load(arrayBuffer);
+      let fullText = '';
+      for (let i = 1; i <= pdfDoc.getPageCount(); i++) {
+        const page = await pdfDoc.getPage(i);
+        const textContent = await page.getTextContent();
+        fullText += textContent.items.map(item => item.str).join(' ') + '\n';
+      }
+      return fullText.replace(/\s+/g, ' ').trim();
+    } else if (fileType.startsWith('text/') || fileType === 'application/json' || filePath.endsWith('.txt') || filePath.endsWith('.csv')) {
+      // Handle plain text, CSV, etc.
+      return await data.text();
+    } else {
+      console.warn(`Unsupported file type for content extraction: ${fileType} for file ${filePath}`);
+      return null;
+    }
   } catch (error) {
-    console.error(`Error processing downloaded file ${filePath}:`, error);
+    console.error(`Error processing file ${filePath} (${fileType}):`, error);
     return null;
   }
 }
@@ -125,7 +143,8 @@ serve(async (req) => {
         if (source.type === 'url') {
           content = await fetchUrlContent(source.name);
         } else if (source.storage_path) { // Assuming files have storage_path
-          content = await downloadFileContent(supabaseClient, source.storage_path);
+          // MODIFIED: Use the new processFileContent function
+          content = await processFileContent(supabaseClient, source.storage_path, source.type);
         }
 
         if (content) {

@@ -323,7 +323,7 @@ const ChatPage = () => {
                 <div
                   key={msg.id}
                   className={`flex items-start gap-3 ${
-                    msg.role === "user" ? "justify-end" : "justify-start" // Removed flex-row-reverse
+                    msg.role === "user" ? "justify-end" : "justify-start"
                   }`}
                 >
                   {msg.role === "assistant" && (
@@ -345,7 +345,7 @@ const ChatPage = () => {
                       {new Date(msg.created_at).toLocaleTimeString()}
                     </p>
                   </div>
-                  {msg.role === "user" && ( // Moved user avatar to be rendered AFTER the message bubble in JSX
+                  {msg.role === "user" && (
                     <Avatar>
                       <AvatarImage src="/placeholder.svg" alt="User" />
                       <AvatarFallback style={{ backgroundColor: primaryAccentColor, color: secondaryAccentColor }}>
@@ -380,7 +380,7 @@ const ChatPage = () => {
             {/* File Upload */}
             <div>
               <Label htmlFor="file-upload" className="text-sm font-medium mb-2 block">
-                Upload Files (Supported: .txt, .pdf, .docx, .csv)
+                Upload Files (Supported: .txt, .pdf, .csv)
               </Label>
               <Input
                 id="file-upload"
