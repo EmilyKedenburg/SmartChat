@@ -2,20 +2,13 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.16.0';
 import { DOMParser } from "https://deno.land/x/deno_dom/deno-dom-wasm.ts";
-// Import a Deno-compatible PDF parser. pdf-parse is Node.js specific.
-// We will use pdfjs-dist 3.x directly here, configured for worker-less mode.
-import * as pdfjsLib from 'https://esm.sh/pdfjs-dist@3.10.111/build/pdf.mjs';
-import type { TextItem } from 'https://esm.sh/pdfjs-dist@3.10.111/types/src/display/api';
+// Importing pdf-parse for PDF extraction, as per user's suggestion.
+import parsePdf from 'https://esm.sh/pdf-parse@1.1.1'; 
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-
-// Configure pdfjs-dist for worker-less mode, essential for Deno Edge Functions
-pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-console.log("ask-llm: pdfjsLib.GlobalWorkerOptions.workerSrc set to empty string for pdfjs-dist 3.x.");
-
 
 // Function to fetch and extract text content from a URL
 async function fetchUrlContent(url: string): Promise<string | null> {
@@ -47,7 +40,7 @@ async function fetchUrlContent(url: string): Promise<string | null> {
   }
 }
 
-// Function to process file content, now including PDF extraction
+// Function to process file content, now using pdf-parse for PDF extraction
 async function processFileContent(supabaseClient: any, filePath: string, fileType: string): Promise<string | null> {
   try {
     const { data, error } = await supabaseClient.storage.from('chat-files').download(filePath);
@@ -60,18 +53,11 @@ async function processFileContent(supabaseClient: any, filePath: string, fileTyp
     }
 
     if (fileType === 'application/pdf') {
-      console.log(`ask-llm: Starting PDF text extraction for ${filePath}...`);
+      console.log(`ask-llm: Starting PDF text extraction for ${filePath} using pdf-parse...`);
       const arrayBuffer = await data.arrayBuffer();
-      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-      const pdfDocument = await loadingTask.promise;
-      let extractedText = "";
-
-      for (let i = 1; i <= pdfDocument.numPages; i++) {
-        const page = await pdfDocument.getPage(i);
-        const textContent = await page.getTextContent();
-        extractedText += textContent.items.map((item: TextItem) => item.str).join(' ') + '\n';
-      }
-      extractedText = extractedText.replace(/\s+/g, ' ').trim();
+      // pdf-parse expects a Buffer or ArrayBuffer
+      const pdf = await parsePdf(arrayBuffer); 
+      const extractedText = pdf.text.replace(/\s+/g, ' ').trim();
       console.log(`ask-llm: PDF text extraction complete for ${filePath}. Length: ${extractedText.length}`);
       return extractedText;
     } else if (fileType.startsWith('text/') || fileType === 'application/json' || filePath.endsWith('.txt') || filePath.endsWith('.csv')) {
