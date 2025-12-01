@@ -6,9 +6,9 @@ import type { Part } from 'https://esm.sh/@google/generative-ai@0.16.0';
 
 // PDF.js imports for Deno
 import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.3.136/build/pdf.mjs";
-// Explicitly set workerSrc to the worker script URL to satisfy pdfjs-dist in Deno environment.
-// This is necessary even for the worker-free .mjs build in some Deno contexts.
-pdfjsLib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.3.136/build/pdf.worker.mjs";
+// Explicitly set workerSrc to an empty string to prevent pdfjs-dist from trying to load a worker.
+// This forces it to run in the main thread, which is often necessary in Deno Edge Functions.
+pdfjsLib.GlobalWorkerOptions.workerSrc = "";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
