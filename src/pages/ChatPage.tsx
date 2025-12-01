@@ -164,7 +164,7 @@ const ChatPage = () => {
       if (insertUserMessageError) throw insertUserMessageError;
 
       // Handle new file uploads to Supabase Storage and create source entries
-      for (const file of files) {
+      const fileProcessingPromises = files.map(async (file) => {
         const filePath = `${userId}/${currentChat}/${file.name}`;
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from("chat-files")
@@ -176,7 +176,7 @@ const ChatPage = () => {
         if (uploadError) {
           console.error("Error uploading file:", uploadError);
           showError(`Failed to upload file ${file.name}: ${uploadError.message}`);
-          continue; // Skip to the next file
+          return null; // Indicate failure for this file
         }
 
         // Insert source entry for the uploaded file
@@ -189,13 +189,35 @@ const ChatPage = () => {
         if (insertSourceError) {
           console.error("Error inserting file source:", insertSourceError);
           showError(`Failed to record file source ${file.name}: ${insertSourceError.message}`);
-        } else if (sourceData) {
-          allSourceIdsForLLM.push(sourceData.id);
+          return null;
         }
-      }
+
+        // If it's a PDF, invoke the extract-pdf Edge Function
+        if (file.type === 'application/pdf') {
+          const { data: extractData, error: extractError } = await supabase.functions.invoke("extract-pdf", {
+            body: { sourceId: sourceData.id },
+          });
+
+          if (extractError) {
+            console.error(`Error invoking extract-pdf for ${file.name}:`, extractError);
+            showError(`Failed to extract text from PDF ${file.name}: ${extractError.message}`);
+            return null;
+          }
+          if (extractData.error) {
+            console.error(`Error from extract-pdf for ${file.name}:`, extractData.error);
+            showError(`Failed to extract text from PDF ${file.name}: ${extractData.error}`);
+            return null;
+          }
+          showSuccess(`PDF content extracted for ${file.name}.`);
+        }
+        return sourceData.id; // Return the source ID for successful processing
+      });
+
+      const newFileSourceIds = (await Promise.all(fileProcessingPromises)).filter(Boolean) as string[];
+      allSourceIdsForLLM.push(...newFileSourceIds);
 
       // Handle new URLs as sources
-      for (const url of filteredUrls) {
+      const urlProcessingPromises = filteredUrls.map(async (url) => {
         const { data: sourceData, error: insertSourceError } = await supabase
           .from("sources")
           .insert({ chat_id: currentChat, user_id: userId, type: "url", name: url, content: url }) // content initially stores the URL itself
@@ -205,10 +227,13 @@ const ChatPage = () => {
         if (insertSourceError) {
           console.error("Error inserting URL source:", insertSourceError);
           showError(`Failed to record URL source ${url}: ${insertSourceError.message}`);
-        } else if (sourceData) {
-          allSourceIdsForLLM.push(sourceData.id);
+          return null;
         }
-      }
+        return sourceData.id;
+      });
+
+      const newUrlSourceIds = (await Promise.all(urlProcessingPromises)).filter(Boolean) as string[];
+      allSourceIdsForLLM.push(...newUrlSourceIds);
 
       // Remove duplicates from allSourceIdsForLLM if any
       allSourceIdsForLLM = Array.from(new Set(allSourceIdsForLLM));
