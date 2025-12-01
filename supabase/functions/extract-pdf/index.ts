@@ -2,6 +2,10 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.3.136/build/pdf.mjs";
 
+// Explicitly set workerSrc to an empty string to satisfy pdfjs-dist in Deno environment.
+// The .mjs build is designed to be worker-free, but it still checks this option.
+pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
