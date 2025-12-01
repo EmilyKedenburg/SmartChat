@@ -39,7 +39,7 @@ async function fetchUrlContent(url: string): Promise<string | null> {
   }
 }
 
-// Function to process text-based file content
+// Function to process text-based file content (used for simple text files if content isn't pre-filled)
 async function processTextFileContent(supabaseClient: any, filePath: string): Promise<string | null> {
   try {
     const { data, error } = await supabaseClient.storage.from('chat-files').download(filePath);
@@ -131,28 +131,9 @@ serve(async (req) => {
 
       parts.push({ text: "\n--- Provided Context ---" });
       for (const source of sources || []) {
-        if (source.type === 'application/pdf' && source.storage_path) {
-          // For PDFs, provide the public URL directly to Gemini as fileData
-          const { data: publicUrlData } = supabaseClient.storage
-            .from('chat-files')
-            .getPublicUrl(source.storage_path);
-          
-          if (publicUrlData?.publicUrl) {
-            // Add a generic text label for the PDF, without the URL or .pdf extension
-            parts.push({ text: `Source (Uploaded PDF File)` });
-            parts.push({
-              fileData: {
-                mimeType: "application/pdf",
-                fileUri: publicUrlData.publicUrl,
-              },
-            });
-            console.log(`ask-llm: Added PDF fileData for ${source.name} with URL: ${publicUrlData.publicUrl}`);
-          } else {
-            console.warn(`ask-llm: Could not get public URL for PDF source ${source.id} at ${source.storage_path}.`);
-            parts.push({ text: `Warning: Could not access PDF source ${source.name}.` });
-          }
-        } else if (source.type === 'url') {
-          let content = source.content;
+        let content = source.content; // Assume content is pre-extracted for files or fetched for URLs
+
+        if (source.type === 'url') {
           if (!content) { // If content not already extracted, fetch it
             content = await fetchUrlContent(source.name);
             if (content) {
@@ -169,13 +150,14 @@ serve(async (req) => {
             console.warn(`Could not get readable content for URL source ${source.id} (${source.name}).`);
             parts.push({ text: `Warning: Could not access URL source ${source.name}.` });
           }
-        } else if (source.storage_path) { // For other file types (txt, csv, docx)
-          let content = source.content;
-          if (!content) { // If content not already extracted, process it
-            // DOCX files are handled by 'extract-docx' and should have content pre-filled
-            // For other text files, process directly
-            if (source.type.startsWith('text/') || source.name.endsWith('.txt') || source.name.endsWith('.csv') || source.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        } else if (source.storage_path) { // For file types (txt, csv, docx, pdf)
+          if (!content) { // If content not already extracted, process it (should be rare for docx/pdf now)
+            // This block is primarily for simple text files if content wasn't read client-side
+            if (source.type.startsWith('text/') || source.name.endsWith('.txt') || source.name.endsWith('.csv')) {
               content = await processTextFileContent(supabaseClient, source.storage_path);
+            } else {
+              console.warn(`ask-llm: File ${source.name} (${source.type}) content not found in DB. It should have been extracted by a dedicated function.`);
+              parts.push({ text: `Warning: File ${source.name} content could not be retrieved.` });
             }
           }
           if (content) {

@@ -197,8 +197,19 @@ const ChatPage = () => {
 
         // Determine which Edge Function to invoke based on file type
         if (file.type === 'application/pdf') {
-          // PDFs are now handled by Gemini directly via URL, no client-side extraction needed
-          showSuccess(`PDF file ${file.name} uploaded. Content will be processed by AI via URL.`);
+          const { data: extractData, error } = await supabase.functions.invoke("extract-pdf", {
+            body: { sourceId: sourceData.id },
+          });
+          edgeFunctionError = error || extractData.error;
+          extractedContent = extractData?.extractedContent;
+          if (edgeFunctionError) {
+            console.error(`Error invoking extract-pdf for ${file.name}:`, edgeFunctionError);
+            showError(`Failed to extract text from PDF ${file.name}: ${edgeFunctionError.message || edgeFunctionError}`);
+          } else if (!extractedContent) {
+            showError(`No content extracted from PDF ${file.name}.`);
+          } else {
+            showSuccess(`PDF content extracted and saved for ${file.name}.`);
+          }
         } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
           const { data: extractData, error } = await supabase.functions.invoke("extract-docx", {
             body: { sourceId: sourceData.id },
@@ -215,26 +226,31 @@ const ChatPage = () => {
           }
         } else if (file.type.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv')) {
           showSuccess(`Text file ${file.name} uploaded. Content will be processed by AI.`);
+          // For simple text files, we can directly read content and update source
+          try {
+            extractedContent = await file.text();
+            const { error: updateContentError } = await supabase
+              .from("sources")
+              .update({ content: extractedContent })
+              .eq("id", sourceData.id);
+            if (updateContentError) {
+              console.error(`Error updating source ${sourceData.id} with text content:`, updateContentError);
+              showError(`Failed to save content for ${file.name}.`);
+              return null;
+            }
+          } catch (readError: any) {
+            console.error(`Error reading text file ${file.name}:`, readError);
+            showError(`Failed to read content from ${file.name}.`);
+            return null;
+          }
         } else {
           showError(`Unsupported file type for extraction: ${file.name}.`);
           return null; // Do not add source if type is unsupported
         }
 
-        // Update the source with the extracted content if available (for non-PDFs)
-        if (extractedContent && !edgeFunctionError) {
-          const { error: updateContentError } = await supabase
-            .from("sources")
-            .update({ content: extractedContent })
-            .eq("id", sourceData.id);
-
-          if (updateContentError) {
-            console.error(`Error updating source ${sourceData.id} with extracted content:`, updateContentError);
-            showError(`Failed to save extracted content for ${file.name}.`);
-            return null;
-          }
-        } else if (edgeFunctionError && file.type !== 'application/pdf') { // Only return null if extraction failed for non-PDFs
-          return null; 
-        }
+        // If content was extracted by an Edge Function, it's already saved to DB.
+        // For simple text files, we handled saving above.
+        // So, no need for a generic updateContentError block here.
         
         return sourceData.id; // Return the source ID for successful processing
       });
