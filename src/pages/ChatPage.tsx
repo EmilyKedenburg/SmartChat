@@ -192,41 +192,64 @@ const ChatPage = () => {
           return null;
         }
 
-        // If it's a PDF, invoke the extract-pdf Edge Function and then update the source content
+        let extractedContent = null;
+        let edgeFunctionError = null;
+
+        // Determine which Edge Function to invoke based on file type
         if (file.type === 'application/pdf') {
-          const { data: extractData, error: extractError } = await supabase.functions.invoke("extract-pdf", {
+          const { data: extractData, error } = await supabase.functions.invoke("extract-pdf", {
             body: { sourceId: sourceData.id },
           });
-
-          if (extractError) {
-            console.error(`Error invoking extract-pdf for ${file.name}:`, extractError);
-            showError(`Failed to extract text from PDF ${file.name}: ${extractError.message}`);
-            return null;
-          }
-          if (extractData.error) {
-            console.error(`Error from extract-pdf for ${file.name}:`, extractData.error);
-            showError(`Failed to extract text from PDF ${file.name}: ${extractData.error}`);
-            return null;
-          }
-
-          // Update the source with the extracted content received from the Edge Function
-          if (extractData.extractedContent) {
-            const { error: updateContentError } = await supabase
-              .from("sources")
-              .update({ content: extractData.extractedContent })
-              .eq("id", sourceData.id);
-
-            if (updateContentError) {
-              console.error(`Error updating source ${sourceData.id} with extracted PDF content:`, updateContentError);
-              showError(`Failed to save extracted PDF content for ${file.name}.`);
-              return null;
-            }
-            showSuccess(`PDF content extracted and saved for ${file.name}.`);
-          } else {
+          edgeFunctionError = error || extractData.error;
+          extractedContent = extractData?.extractedContent;
+          if (edgeFunctionError) {
+            console.error(`Error invoking extract-pdf for ${file.name}:`, edgeFunctionError);
+            showError(`Failed to extract text from PDF ${file.name}: ${edgeFunctionError.message || edgeFunctionError}`);
+          } else if (!extractedContent) {
             showError(`No content extracted from PDF ${file.name}.`);
+          } else {
+            showSuccess(`PDF content extracted and saved for ${file.name}.`);
+          }
+        } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+          const { data: extractData, error } = await supabase.functions.invoke("extract-docx", {
+            body: { sourceId: sourceData.id },
+          });
+          edgeFunctionError = error || extractData.error;
+          extractedContent = extractData?.extractedContent;
+          if (edgeFunctionError) {
+            console.error(`Error invoking extract-docx for ${file.name}:`, edgeFunctionError);
+            showError(`Failed to extract text from DOCX ${file.name}: ${edgeFunctionError.message || edgeFunctionError}`);
+          } else if (!extractedContent) {
+            showError(`No content extracted from DOCX ${file.name}.`);
+          } else {
+            showSuccess(`DOCX content extracted and saved for ${file.name}.`);
+          }
+        } else if (file.type.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv')) {
+          // For other text-based files, we can directly read content on the client or let ask-llm handle it
+          // For now, we'll let ask-llm handle it by reading from storage if 'content' is null
+          // No explicit extraction function needed here, content will be fetched by ask-llm if not already set.
+          showSuccess(`Text file ${file.name} uploaded. Content will be processed by AI.`);
+        } else {
+          showError(`Unsupported file type for extraction: ${file.name}.`);
+          return null; // Do not add source if type is unsupported
+        }
+
+        // Update the source with the extracted content if available
+        if (extractedContent && !edgeFunctionError) {
+          const { error: updateContentError } = await supabase
+            .from("sources")
+            .update({ content: extractedContent })
+            .eq("id", sourceData.id);
+
+          if (updateContentError) {
+            console.error(`Error updating source ${sourceData.id} with extracted content:`, updateContentError);
+            showError(`Failed to save extracted content for ${file.name}.`);
             return null;
           }
+        } else if (edgeFunctionError) {
+          return null; // If extraction failed, don't add this source to the LLM context
         }
+        
         return sourceData.id; // Return the source ID for successful processing
       });
 
@@ -422,7 +445,7 @@ const ChatPage = () => {
             {/* File Upload */}
             <div>
               <Label htmlFor="file-upload" className="text-sm font-medium mb-2 block">
-                Upload Files (Supported: .txt, .pdf, .csv)
+                Upload Files (Supported: .txt, .pdf, .csv, .docx)
               </Label>
               <Input
                 id="file-upload"
