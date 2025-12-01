@@ -94,9 +94,11 @@ const ChatPage = () => {
       const filesToProcess: ProcessedFile[] = newFiles.map(file => ({ ...file, isProcessing: false }));
       setProcessedFiles(prev => [...prev, ...filesToProcess]);
 
-      const processingPromises = filesToProcess.map(async (file, index) => {
+      const processingPromises = filesToProcess.map(async (file) => {
         const updatedFile = { ...file };
-        if (file.type && file.type === 'application/pdf') {
+        const fileType = file.type || ''; // Ensure fileType is a string for startsWith/includes
+
+        if (fileType === 'application/pdf') {
           updatedFile.isProcessing = true;
           setProcessedFiles(prev => prev.map(f => f === file ? updatedFile : f)); // Update processing state
           try {
@@ -116,7 +118,7 @@ const ChatPage = () => {
             updatedFile.isProcessing = false;
             setProcessedFiles(prev => prev.map(f => f === file ? updatedFile : f)); // Update final state
           }
-        } else if (file.type && (file.type.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv'))) {
+        } else if (fileType.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv')) {
           try {
             updatedFile.extractedContent = await file.text();
             showSuccess(`Text file ${file.name} content read.`);
@@ -126,7 +128,13 @@ const ChatPage = () => {
             showError(`Failed to read text file content from ${file.name}.`);
           }
           setProcessedFiles(prev => prev.map(f => f === file ? updatedFile : f)); // Update final state
-        } else {
+        } else if (fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || file.name.endsWith('.docx')) {
+          // DOCX files are handled by Edge Function, no client-side extraction here.
+          // Just add them to processedFiles without an error.
+          showSuccess(`DOCX file ${file.name} ready for upload.`);
+          setProcessedFiles(prev => prev.map(f => f === file ? updatedFile : f)); // Update final state
+        }
+        else {
           updatedFile.extractionError = `Unsupported file type for extraction: ${file.name}.`;
           showError(`Unsupported file type for extraction: ${file.name}.`);
           setProcessedFiles(prev => prev.map(f => f === file ? updatedFile : f)); // Update final state
@@ -248,8 +256,9 @@ const ChatPage = () => {
         }
 
         let sourceIdToReturn = null;
+        const fileType = file.type || ''; // Ensure fileType is a string
 
-        if (file.type && file.type === 'application/pdf') {
+        if (fileType === 'application/pdf') {
           // Generate a signed URL for the uploaded PDF
           const { data: signedUrlData, error: signedUrlError } = await supabase.storage
             .from("chat-files")
@@ -277,11 +286,11 @@ const ChatPage = () => {
           showSuccess(`PDF file ${file.name} uploaded and registered as a URL source.`);
           sourceIdToReturn = sourceData.id;
 
-        } else if (file.type && file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        } else if (fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || file.name.endsWith('.docx')) {
           // Existing DOCX logic
           const { data: sourceData, error: insertSourceError } = await supabase
             .from("sources")
-            .insert({ chat_id: currentChat, user_id: userId, type: file.type, name: file.name, storage_path: filePath })
+            .insert({ chat_id: currentChat, user_id: userId, type: fileType, name: file.name, storage_path: filePath })
             .select("id")
             .single();
 
@@ -315,11 +324,11 @@ const ChatPage = () => {
           }
           sourceIdToReturn = sourceData.id;
 
-        } else if (file.type && (file.type.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv'))) {
+        } else if (fileType.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv')) {
           // Existing text file logic, now using pre-extracted content
           const { data: sourceData, error: insertSourceError } = await supabase
             .from("sources")
-            .insert({ chat_id: currentChat, user_id: userId, type: file.type, name: file.name, storage_path: filePath, content: file.extractedContent })
+            .insert({ chat_id: currentChat, user_id: userId, type: fileType, name: file.name, storage_path: filePath, content: file.extractedContent })
             .select("id")
             .single();
 
