@@ -17,13 +17,6 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import SourceDisplay from "@/components/SourceDisplay";
 
-// PDF.js imports for client-side
-import * as pdfjsLib from "pdfjs-dist";
-import { GlobalWorkerOptions } from "pdfjs-dist/build/pdf";
-// Set workerSrc for client-side PDF.js
-GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
-
-
 interface Message {
   id: string;
   content: string;
@@ -31,10 +24,12 @@ interface Message {
   created_at: string;
 }
 
-interface ProcessedFile extends File {
-  extractedContent?: string;
-  isProcessing?: boolean;
-  extractionError?: string;
+interface Source {
+  id: string;
+  type: string;
+  name: string;
+  content?: string;
+  storage_path?: string;
 }
 
 const ChatPage = () => {
@@ -42,7 +37,7 @@ const ChatPage = () => {
   const navigate = useNavigate();
 
   const [question, setQuestion] = useState<string>("");
-  const [processedFiles, setProcessedFiles] = useState<ProcessedFile[]>([]);
+  const [files, setFiles] = useState<File[]>([]);
   const [urls, setUrls] = useState<string[]>([""]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
@@ -70,85 +65,14 @@ const ChatPage = () => {
     setQuestion(e.target.value);
   };
 
-  const extractPdfContentFromBuffer = async (arrayBuffer: ArrayBuffer): Promise<string | null> => {
-    try {
-      const uint8 = new Uint8Array(arrayBuffer);
-      const pdf = await pdfjsLib.getDocument({ data: uint8 }).promise;
-      let extractedText = "";
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const pageText = content.items.map((item: any) => item.str).join(" ");
-        extractedText += pageText + "\n\n";
-      }
-      return extractedText.replace(/\s+/g, ' ').trim();
-    } catch (error) {
-      console.error("Error extracting PDF content:", error);
-      return null;
-    }
-  };
-
-  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const newFiles = Array.from(e.target.files);
-      const filesToProcess: ProcessedFile[] = newFiles.map(file => ({ ...file, isProcessing: false }));
-      setProcessedFiles(prev => [...prev, ...filesToProcess]);
-
-      const processingPromises = filesToProcess.map(async (file) => {
-        const updatedFile = { ...file };
-        const fileType = typeof file.type === 'string' ? file.type : ''; // Ensure fileType is a string
-        const fileName = typeof file.name === 'string' ? file.name : ''; // Ensure fileName is a string
-
-        if (fileType === 'application/pdf') {
-          updatedFile.isProcessing = true;
-          setProcessedFiles(prev => prev.map(f => f === file ? updatedFile : f)); // Update processing state
-          try {
-            const arrayBuffer = await file.arrayBuffer();
-            updatedFile.extractedContent = await extractPdfContentFromBuffer(arrayBuffer);
-            if (updatedFile.extractedContent) {
-              showSuccess(`PDF content extracted from ${fileName}.`);
-            } else {
-              updatedFile.extractionError = `Failed to extract content from ${fileName}.`;
-              showError(`Failed to extract PDF content from ${fileName}.`);
-            }
-          } catch (error: any) {
-            console.error(`Error extracting PDF content from ${fileName}:`, error);
-            updatedFile.extractionError = `Failed to extract PDF content: ${error.message}`;
-            showError(`Failed to extract PDF content from ${fileName}.`);
-          } finally {
-            updatedFile.isProcessing = false;
-            setProcessedFiles(prev => prev.map(f => f === file ? updatedFile : f)); // Update final state
-          }
-        } else if (fileType.startsWith('text/') || fileName.endsWith('.txt') || fileName.endsWith('.csv')) {
-          try {
-            updatedFile.extractedContent = await file.text();
-            showSuccess(`Text file ${fileName} content read.`);
-          } catch (error: any) {
-            console.error(`Error reading text file ${fileName}:`, error);
-            updatedFile.extractionError = `Failed to read text file content: ${error.message}`;
-            showError(`Failed to read text file content from ${fileName}.`);
-          }
-          setProcessedFiles(prev => prev.map(f => f === file ? updatedFile : f)); // Update final state
-        } else if (fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || fileName.endsWith('.docx')) {
-          // DOCX files are handled by Edge Function, no client-side extraction here.
-          // Just add them to processedFiles without an error.
-          showSuccess(`DOCX file ${fileName} ready for upload.`);
-          setProcessedFiles(prev => prev.map(f => f === file ? updatedFile : f)); // Update final state
-        }
-        else {
-          updatedFile.extractionError = `Unsupported file type for extraction: ${fileName}.`;
-          showError(`Unsupported file type for extraction: ${fileName}.`);
-          setProcessedFiles(prev => prev.map(f => f === file ? updatedFile : f)); // Update final state
-        }
-        return updatedFile;
-      });
-
-      await Promise.all(processingPromises);
+      setFiles(Array.from(e.target.files));
     }
   };
 
   const handleRemoveFile = (index: number) => {
-    setProcessedFiles(processedFiles.filter((_, i) => i !== index));
+    setFiles(files.filter((_, i) => i !== index));
   };
 
   const handleUrlChange = (index: number, value: string) => {
@@ -185,9 +109,8 @@ const ChatPage = () => {
     const userId = session.user.id;
     const trimmedQuestion = question.trim();
     const filteredUrls = urls.filter(url => url.trim() !== "");
-    const validFiles = processedFiles.filter(file => !file.extractionError);
 
-    if (!trimmedQuestion && validFiles.length === 0 && filteredUrls.length === 0) {
+    if (!trimmedQuestion && files.length === 0 && filteredUrls.length === 0) {
       showError("Please provide a question, files, or URLs.");
       return;
     }
@@ -241,7 +164,7 @@ const ChatPage = () => {
       if (insertUserMessageError) throw insertUserMessageError;
 
       // Handle new file uploads to Supabase Storage and create source entries
-      const fileProcessingPromises = validFiles.map(async (file) => {
+      const fileProcessingPromises = files.map(async (file) => {
         const filePath = `${userId}/${currentChat}/${file.name}`;
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from("chat-files")
@@ -257,48 +180,46 @@ const ChatPage = () => {
         }
 
         let sourceIdToReturn = null;
-        const fileType = typeof file.type === 'string' ? file.type : ''; // Ensure fileType is a string
-        const fileName = typeof file.name === 'string' ? file.name : ''; // Ensure fileName is a string
 
-        if (fileType === 'application/pdf') {
+        if (file.type === 'application/pdf') {
           // Generate a signed URL for the uploaded PDF
           const { data: signedUrlData, error: signedUrlError } = await supabase.storage
             .from("chat-files")
             .createSignedUrl(filePath, 3600); // URL valid for 1 hour
 
-          if (signedUrlError || !signedUrlData?.signedUrl) {
+          if (signedUrlError || !signedUrlData?.signedUrl) { // Corrected from signedId to signedUrl
             console.error("Error generating signed URL for PDF:", signedUrlError);
-            showError(`Failed to generate URL for PDF ${fileName}.`);
+            showError(`Failed to generate URL for PDF ${file.name}.`);
             return null;
           }
           const signedUrl = signedUrlData.signedUrl;
 
-          // Insert source entry as type 'url' with the signed URL and pre-extracted content
+          // Insert source entry as type 'url' with the signed URL
           const { data: sourceData, error: insertSourceError } = await supabase
             .from("sources")
-            .insert({ chat_id: currentChat, user_id: userId, type: "url", name: signedUrl, content: file.extractedContent, storage_path: filePath })
+            .insert({ chat_id: currentChat, user_id: userId, type: "url", name: signedUrl, storage_path: filePath }) // Keep storage_path for download in SourceDisplay
             .select("id")
             .single();
 
           if (insertSourceError) {
             console.error("Error inserting PDF source as URL:", insertSourceError);
-            showError(`Failed to record PDF source ${fileName}: ${insertSourceError.message}`);
+            showError(`Failed to record PDF source ${file.name}: ${insertSourceError.message}`);
             return null;
           }
-          showSuccess(`PDF file ${fileName} uploaded and registered as a URL source.`);
+          showSuccess(`PDF file ${file.name} uploaded and registered as a URL source.`);
           sourceIdToReturn = sourceData.id;
 
-        } else if (fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || fileName.endsWith('.docx')) {
+        } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
           // Existing DOCX logic
           const { data: sourceData, error: insertSourceError } = await supabase
             .from("sources")
-            .insert({ chat_id: currentChat, user_id: userId, type: fileType, name: fileName, storage_path: filePath })
+            .insert({ chat_id: currentChat, user_id: userId, type: file.type, name: file.name, storage_path: filePath })
             .select("id")
             .single();
 
           if (insertSourceError) {
             console.error("Error inserting DOCX source:", insertSourceError);
-            showError(`Failed to record DOCX source ${fileName}: ${insertSourceError.message}`);
+            showError(`Failed to record DOCX source ${file.name}: ${insertSourceError.message}`);
             return null;
           }
 
@@ -308,43 +229,50 @@ const ChatPage = () => {
           const edgeFunctionError = error || extractData.error;
           const extractedContent = extractData?.extractedContent;
           if (edgeFunctionError) {
-            console.error(`Error invoking extract-docx for ${fileName}:`, edgeFunctionError);
-            showError(`Failed to extract text from DOCX ${fileName}: ${edgeFunctionError.message || edgeFunctionError}`);
+            console.error(`Error invoking extract-docx for ${file.name}:`, edgeFunctionError);
+            showError(`Failed to extract text from DOCX ${file.name}: ${edgeFunctionError.message || edgeFunctionError}`);
           } else if (!extractedContent) {
-            showError(`No content extracted from DOCX ${fileName}.`);
+            showError(`No content extracted from DOCX ${file.name}.`);
           } else {
-            showSuccess(`DOCX content extracted and saved for ${fileName}.`);
-            // Update the source with extracted content
-            const { error: updateContentError } = await supabase
-              .from("sources")
-              .update({ content: extractedContent })
-              .eq("id", sourceData.id);
-            if (updateContentError) {
-              console.error(`Error updating source ${sourceData.id} with DOCX content:`, updateContentError);
-              showError(`Failed to save extracted content for ${fileName}.`);
-            }
+            showSuccess(`DOCX content extracted and saved for ${file.name}.`);
           }
           sourceIdToReturn = sourceData.id;
 
-        } else if (fileType.startsWith('text/') || fileName.endsWith('.txt') || fileName.endsWith('.csv')) {
-          // Existing text file logic, now using pre-extracted content
+        } else if (file.type.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv')) {
+          // Existing text file logic
           const { data: sourceData, error: insertSourceError } = await supabase
             .from("sources")
-            .insert({ chat_id: currentChat, user_id: userId, type: fileType, name: fileName, storage_path: filePath, content: file.extractedContent })
+            .insert({ chat_id: currentChat, user_id: userId, type: file.type, name: file.name, storage_path: filePath })
             .select("id")
             .single();
 
           if (insertSourceError) {
             console.error("Error inserting text file source:", insertSourceError);
-            showError(`Failed to record text file source ${fileName}: ${insertSourceError.message}`);
+            showError(`Failed to record text file source ${file.name}: ${insertSourceError.message}`);
             return null;
           }
 
-          showSuccess(`Text file ${fileName} uploaded with content.`);
+          showSuccess(`Text file ${file.name} uploaded. Content will be processed by AI.`);
+          try {
+            const extractedContent = await file.text();
+            const { error: updateContentError } = await supabase
+              .from("sources")
+              .update({ content: extractedContent })
+              .eq("id", sourceData.id);
+            if (updateContentError) {
+              console.error(`Error updating source ${sourceData.id} with text content:`, updateContentError);
+              showError(`Failed to save content for ${file.name}.`);
+              return null;
+            }
+          } catch (readError: any) {
+            console.error(`Error reading text file ${file.name}:`, readError);
+            showError(`Failed to read content from ${file.name}.`);
+            return null;
+          }
           sourceIdToReturn = sourceData.id;
 
         } else {
-          showError(`Unsupported file type for upload: ${fileName}.`);
+          showError(`Unsupported file type for extraction: ${file.name}.`);
           return null; // Do not add source if type is unsupported
         }
         
@@ -411,7 +339,7 @@ const ChatPage = () => {
       if (insertAssistantMessageError) throw insertAssistantMessageError;
 
       setQuestion("");
-      setProcessedFiles([]); // Clear processed files after submission
+      setFiles([]);
       setUrls([""]);
       showSuccess("Response received!");
 
@@ -554,20 +482,16 @@ const ChatPage = () => {
                 disabled={isLoadingResponse}
               />
               <div className="mt-2 space-y-1">
-                {processedFiles.map((file, index) => (
+                {files.map((file, index) => (
                   <div key={index} className="flex items-center justify-between bg-gray-50 dark:bg-gray-700 p-2 rounded-md">
-                    <span className="text-sm text-gray-700 dark:text-gray-300">
-                      {file.name}
-                      {file.isProcessing && <Loader2 className="ml-2 h-4 w-4 animate-spin inline-block" />}
-                      {file.extractionError && <span className="ml-2 text-red-500 text-xs">({file.extractionError})</span>}
-                    </span>
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{file.name}</span>
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
                       onClick={() => handleRemoveFile(index)}
                       className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                      disabled={isLoadingResponse || file.isProcessing}
+                      disabled={isLoadingResponse}
                     >
                       <X className="h-4 w-4" />
                     </Button>
@@ -616,7 +540,7 @@ const ChatPage = () => {
               type="submit"
               className="w-full py-3 text-lg font-semibold"
               style={{ backgroundColor: primaryAccentColor, color: "#030816" }}
-              disabled={isLoadingResponse || processedFiles.some(f => f.isProcessing)}
+              disabled={isLoadingResponse}
             >
               {isLoadingResponse ? (
                 <>
