@@ -2,11 +2,20 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.16.0';
 import { DOMParser } from "https://deno.land/x/deno_dom/deno-dom-wasm.ts";
+// Import a Deno-compatible PDF parser. pdf-parse is Node.js specific.
+// We will use pdfjs-dist 3.x directly here, configured for worker-less mode.
+import * as pdfjsLib from 'https://esm.sh/pdfjs-dist@3.10.111/build/pdf.mjs';
+import type { TextItem } from 'https://esm.sh/pdfjs-dist@3.10.111/types/src/display/api';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// Configure pdfjs-dist for worker-less mode, essential for Deno Edge Functions
+pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+console.log("ask-llm: pdfjsLib.GlobalWorkerOptions.workerSrc set to empty string for pdfjs-dist 3.x.");
+
 
 // Function to fetch and extract text content from a URL
 async function fetchUrlContent(url: string): Promise<string | null> {
@@ -38,8 +47,7 @@ async function fetchUrlContent(url: string): Promise<string | null> {
   }
 }
 
-// This function is now strictly for non-PDF files that are text-based.
-// PDFs are expected to have their content pre-extracted by the 'extract-pdf' function.
+// Function to process file content, now including PDF extraction
 async function processFileContent(supabaseClient: any, filePath: string, fileType: string): Promise<string | null> {
   try {
     const { data, error } = await supabaseClient.storage.from('chat-files').download(filePath);
@@ -51,15 +59,29 @@ async function processFileContent(supabaseClient: any, filePath: string, fileTyp
       return null;
     }
 
-    // Only handle plain text, CSV, etc. PDFs are handled by 'extract-pdf'
-    if (fileType.startsWith('text/') || fileType === 'application/json' || filePath.endsWith('.txt') || filePath.endsWith('.csv')) {
+    if (fileType === 'application/pdf') {
+      console.log(`ask-llm: Starting PDF text extraction for ${filePath}...`);
+      const arrayBuffer = await data.arrayBuffer();
+      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      const pdfDocument = await loadingTask.promise;
+      let extractedText = "";
+
+      for (let i = 1; i <= pdfDocument.numPages; i++) {
+        const page = await pdfDocument.getPage(i);
+        const textContent = await page.getTextContent();
+        extractedText += textContent.items.map((item: TextItem) => item.str).join(' ') + '\n';
+      }
+      extractedText = extractedText.replace(/\s+/g, ' ').trim();
+      console.log(`ask-llm: PDF text extraction complete for ${filePath}. Length: ${extractedText.length}`);
+      return extractedText;
+    } else if (fileType.startsWith('text/') || fileType === 'application/json' || filePath.endsWith('.txt') || filePath.endsWith('.csv')) {
       return await data.text();
     } else {
-      console.warn(`Unsupported file type for direct content extraction in ask-llm: ${fileType} for file ${filePath}. This should be pre-processed by 'extract-pdf' or is not a text-based file.`);
+      console.warn(`ask-llm: Unsupported file type for direct content extraction: ${fileType} for file ${filePath}.`);
       return null;
     }
   } catch (error) {
-    console.error(`Error processing file ${filePath} (${fileType}):`, error);
+    console.error(`ask-llm: Error processing file ${filePath} (${fileType}):`, error);
     return null;
   }
 }
@@ -145,8 +167,7 @@ serve(async (req) => {
               console.error(`Error updating source ${source.id} with URL content:`, updateSourceError);
             }
           }
-        } else if (source.storage_path && source.type !== 'application/pdf') {
-          // Only process non-PDF files with storage_path if content is not already present
+        } else if (source.storage_path) { // Handle all files with storage_path here
           if (!source.content) {
             content = await processFileContent(supabaseClient, source.storage_path, source.type);
             // If content was processed from file and not already in DB, update it
@@ -163,15 +184,12 @@ serve(async (req) => {
           } else {
             content = source.content; // Use existing content if available
           }
-        } else if (source.type === 'application/pdf') {
-          // For PDFs, we strictly rely on the 'content' field being pre-populated by 'extract-pdf'
-          content = source.content;
         }
 
         if (content) {
           extractedContents.push({ id: source.id, content, name: source.name, type: source.type });
         } else {
-          console.warn(`Could not get readable content for source ${source.id} (type: ${source.type}, name: ${source.name}). It might be a PDF not yet processed by 'extract-pdf' or an unsupported file type.`);
+          console.warn(`Could not get readable content for source ${source.id} (type: ${source.type}, name: ${source.name}).`);
         }
       }
 

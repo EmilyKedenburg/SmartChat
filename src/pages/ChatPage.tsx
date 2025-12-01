@@ -197,19 +197,8 @@ const ChatPage = () => {
 
         // Determine which Edge Function to invoke based on file type
         if (file.type === 'application/pdf') {
-          const { data: extractData, error } = await supabase.functions.invoke("extract-pdf", {
-            body: { sourceId: sourceData.id },
-          });
-          edgeFunctionError = error || extractData.error;
-          extractedContent = extractData?.extractedContent;
-          if (edgeFunctionError) {
-            console.error(`Error invoking extract-pdf for ${file.name}:`, edgeFunctionError);
-            showError(`Failed to extract text from PDF ${file.name}: ${edgeFunctionError.message || edgeFunctionError}`);
-          } else if (!extractedContent) {
-            showError(`No content extracted from PDF ${file.name}.`);
-          } else {
-            showSuccess(`PDF content extracted and saved for ${file.name}.`);
-          }
+          // PDF extraction will now be handled by ask-llm directly
+          showSuccess(`PDF file ${file.name} uploaded. Content will be processed by AI.`);
         } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
           const { data: extractData, error } = await supabase.functions.invoke("extract-docx", {
             body: { sourceId: sourceData.id },
@@ -225,9 +214,6 @@ const ChatPage = () => {
             showSuccess(`DOCX content extracted and saved for ${file.name}.`);
           }
         } else if (file.type.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv')) {
-          // For other text-based files, we can directly read content on the client or let ask-llm handle it
-          // For now, we'll let ask-llm handle it by reading from storage if 'content' is null
-          // No explicit extraction function needed here, content will be fetched by ask-llm if not already set.
           showSuccess(`Text file ${file.name} uploaded. Content will be processed by AI.`);
         } else {
           showError(`Unsupported file type for extraction: ${file.name}.`);
