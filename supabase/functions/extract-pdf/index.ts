@@ -98,21 +98,8 @@ serve(async (req) => {
     console.log(`extract-pdf: Text extraction complete. Extracted text length: ${extractedText.length}`);
     // console.log(`extract-pdf: Extracted text preview: ${extractedText.substring(0, 200)}...`); // Log a preview
 
-    const { error: updateSourceError } = await supabaseClient
-      .from('sources')
-      .update({ content: extractedText })
-      .eq('id', sourceId);
-
-    if (updateSourceError) {
-      console.error(`extract-pdf: Error updating source ${sourceId} with extracted content:`, updateSourceError);
-      return new Response(JSON.stringify({ error: 'Failed to update source with extracted content.' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 500,
-      });
-    }
-    console.log(`extract-pdf: Source ${sourceId} updated with extracted content.`);
-
-    return new Response(JSON.stringify({ message: 'PDF content extracted and saved successfully.', sourceId }), {
+    // Return the extracted text to the client
+    return new Response(JSON.stringify({ message: 'PDF content extracted successfully.', sourceId, extractedContent: extractedText }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });

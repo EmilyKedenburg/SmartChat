@@ -192,7 +192,7 @@ const ChatPage = () => {
           return null;
         }
 
-        // If it's a PDF, invoke the extract-pdf Edge Function
+        // If it's a PDF, invoke the extract-pdf Edge Function and then update the source content
         if (file.type === 'application/pdf') {
           const { data: extractData, error: extractError } = await supabase.functions.invoke("extract-pdf", {
             body: { sourceId: sourceData.id },
@@ -208,7 +208,24 @@ const ChatPage = () => {
             showError(`Failed to extract text from PDF ${file.name}: ${extractData.error}`);
             return null;
           }
-          showSuccess(`PDF content extracted for ${file.name}.`);
+
+          // Update the source with the extracted content received from the Edge Function
+          if (extractData.extractedContent) {
+            const { error: updateContentError } = await supabase
+              .from("sources")
+              .update({ content: extractData.extractedContent })
+              .eq("id", sourceData.id);
+
+            if (updateContentError) {
+              console.error(`Error updating source ${sourceData.id} with extracted PDF content:`, updateContentError);
+              showError(`Failed to save extracted PDF content for ${file.name}.`);
+              return null;
+            }
+            showSuccess(`PDF content extracted and saved for ${file.name}.`);
+          } else {
+            showError(`No content extracted from PDF ${file.name}.`);
+            return null;
+          }
         }
         return sourceData.id; // Return the source ID for successful processing
       });
