@@ -179,55 +179,32 @@ const ChatPage = () => {
           return null; // Indicate failure for this file
         }
 
-        let sourceIdToReturn = null;
+        // Insert source entry for the uploaded file
+        const { data: sourceData, error: insertSourceError } = await supabase
+          .from("sources")
+          .insert({ chat_id: currentChat, user_id: userId, type: file.type || "application/octet-stream", name: file.name, storage_path: filePath })
+          .select("id")
+          .single();
 
+        if (insertSourceError) {
+          console.error("Error inserting file source:", insertSourceError);
+          showError(`Failed to record file source ${file.name}: ${insertSourceError.message}`);
+          return null;
+        }
+
+        let extractedContent = null;
+        let edgeFunctionError = null;
+
+        // Determine which Edge Function to invoke based on file type
         if (file.type === 'application/pdf') {
-          // Generate a signed URL for the uploaded PDF
-          const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-            .from("chat-files")
-            .createSignedUrl(filePath, 3600); // URL valid for 1 hour
-
-          if (signedUrlError || !signedUrlData?.signedUrl) { // Corrected from signedId to signedUrl
-            console.error("Error generating signed URL for PDF:", signedUrlError);
-            showError(`Failed to generate URL for PDF ${file.name}.`);
-            return null;
-          }
-          const signedUrl = signedUrlData.signedUrl;
-
-          // Insert source entry as type 'url' with the signed URL
-          const { data: sourceData, error: insertSourceError } = await supabase
-            .from("sources")
-            .insert({ chat_id: currentChat, user_id: userId, type: "url", name: signedUrl, storage_path: filePath }) // Keep storage_path for download in SourceDisplay
-            .select("id")
-            .single();
-
-          if (insertSourceError) {
-            console.error("Error inserting PDF source as URL:", insertSourceError);
-            showError(`Failed to record PDF source ${file.name}: ${insertSourceError.message}`);
-            return null;
-          }
-          showSuccess(`PDF file ${file.name} uploaded and registered as a URL source.`);
-          sourceIdToReturn = sourceData.id;
-
+          // PDFs are now handled by Gemini directly via URL, no client-side extraction needed
+          showSuccess(`PDF file ${file.name} uploaded. Content will be processed by AI via URL.`);
         } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-          // Existing DOCX logic
-          const { data: sourceData, error: insertSourceError } = await supabase
-            .from("sources")
-            .insert({ chat_id: currentChat, user_id: userId, type: file.type, name: file.name, storage_path: filePath })
-            .select("id")
-            .single();
-
-          if (insertSourceError) {
-            console.error("Error inserting DOCX source:", insertSourceError);
-            showError(`Failed to record DOCX source ${file.name}: ${insertSourceError.message}`);
-            return null;
-          }
-
           const { data: extractData, error } = await supabase.functions.invoke("extract-docx", {
             body: { sourceId: sourceData.id },
           });
-          const edgeFunctionError = error || extractData.error;
-          const extractedContent = extractData?.extractedContent;
+          edgeFunctionError = error || extractData.error;
+          extractedContent = extractData?.extractedContent;
           if (edgeFunctionError) {
             console.error(`Error invoking extract-docx for ${file.name}:`, edgeFunctionError);
             showError(`Failed to extract text from DOCX ${file.name}: ${edgeFunctionError.message || edgeFunctionError}`);
@@ -236,47 +213,30 @@ const ChatPage = () => {
           } else {
             showSuccess(`DOCX content extracted and saved for ${file.name}.`);
           }
-          sourceIdToReturn = sourceData.id;
-
         } else if (file.type.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv')) {
-          // Existing text file logic
-          const { data: sourceData, error: insertSourceError } = await supabase
-            .from("sources")
-            .insert({ chat_id: currentChat, user_id: userId, type: file.type, name: file.name, storage_path: filePath })
-            .select("id")
-            .single();
-
-          if (insertSourceError) {
-            console.error("Error inserting text file source:", insertSourceError);
-            showError(`Failed to record text file source ${file.name}: ${insertSourceError.message}`);
-            return null;
-          }
-
           showSuccess(`Text file ${file.name} uploaded. Content will be processed by AI.`);
-          try {
-            const extractedContent = await file.text();
-            const { error: updateContentError } = await supabase
-              .from("sources")
-              .update({ content: extractedContent })
-              .eq("id", sourceData.id);
-            if (updateContentError) {
-              console.error(`Error updating source ${sourceData.id} with text content:`, updateContentError);
-              showError(`Failed to save content for ${file.name}.`);
-              return null;
-            }
-          } catch (readError: any) {
-            console.error(`Error reading text file ${file.name}:`, readError);
-            showError(`Failed to read content from ${file.name}.`);
-            return null;
-          }
-          sourceIdToReturn = sourceData.id;
-
         } else {
           showError(`Unsupported file type for extraction: ${file.name}.`);
           return null; // Do not add source if type is unsupported
         }
+
+        // Update the source with the extracted content if available (for non-PDFs)
+        if (extractedContent && !edgeFunctionError) {
+          const { error: updateContentError } = await supabase
+            .from("sources")
+            .update({ content: extractedContent })
+            .eq("id", sourceData.id);
+
+          if (updateContentError) {
+            console.error(`Error updating source ${sourceData.id} with extracted content:`, updateContentError);
+            showError(`Failed to save extracted content for ${file.name}.`);
+            return null;
+          }
+        } else if (edgeFunctionError && file.type !== 'application/pdf') { // Only return null if extraction failed for non-PDFs
+          return null; 
+        }
         
-        return sourceIdToReturn; // Return the source ID for successful processing
+        return sourceData.id; // Return the source ID for successful processing
       });
 
       const newFileSourceIds = (await Promise.all(fileProcessingPromises)).filter(Boolean) as string[];
