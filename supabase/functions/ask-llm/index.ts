@@ -38,7 +38,8 @@ async function fetchUrlContent(url: string): Promise<string | null> {
   }
 }
 
-// MODIFIED: Function to download file content from Supabase Storage and parse only text-based files
+// This function is now strictly for non-PDF files that are text-based.
+// PDFs are expected to have their content pre-extracted by the 'extract-pdf' function.
 async function processFileContent(supabaseClient: any, filePath: string, fileType: string): Promise<string | null> {
   try {
     const { data, error } = await supabaseClient.storage.from('chat-files').download(filePath);
@@ -50,11 +51,11 @@ async function processFileContent(supabaseClient: any, filePath: string, fileTyp
       return null;
     }
 
-    // Only handle plain text, CSV, etc. PDFs are now handled by extract-pdf function
+    // Only handle plain text, CSV, etc. PDFs are handled by 'extract-pdf'
     if (fileType.startsWith('text/') || fileType === 'application/json' || filePath.endsWith('.txt') || filePath.endsWith('.csv')) {
       return await data.text();
     } else {
-      console.warn(`Unsupported file type for direct content extraction in ask-llm: ${fileType} for file ${filePath}. This should be pre-processed.`);
+      console.warn(`Unsupported file type for direct content extraction in ask-llm: ${fileType} for file ${filePath}. This should be pre-processed by 'extract-pdf' or is not a text-based file.`);
       return null;
     }
   } catch (error) {
@@ -133,26 +134,44 @@ serve(async (req) => {
           content = source.content;
         } else if (source.type === 'url') {
           content = await fetchUrlContent(source.name);
-        } else if (source.storage_path) { // Assuming files have storage_path
-          // Only process text-based files directly. PDFs should have content pre-extracted.
-          content = await processFileContent(supabaseClient, source.storage_path, source.type);
-        }
-
-        if (content) {
-          extractedContents.push({ id: source.id, content, name: source.name, type: source.type });
-          // If content was fetched/processed here and not already in DB, update it
-          if (!source.content && (source.type === 'url' || source.type.startsWith('text/'))) {
+          // If content was fetched from URL and not already in DB, update it
+          if (content && !source.content) {
             const { error: updateSourceError } = await supabaseClient
               .from('sources')
               .update({ content: content })
               .eq('id', source.id);
 
             if (updateSourceError) {
-              console.error(`Error updating source ${source.id} with content:`, updateSourceError);
+              console.error(`Error updating source ${source.id} with URL content:`, updateSourceError);
             }
           }
+        } else if (source.storage_path && source.type !== 'application/pdf') {
+          // Only process non-PDF files with storage_path if content is not already present
+          if (!source.content) {
+            content = await processFileContent(supabaseClient, source.storage_path, source.type);
+            // If content was processed from file and not already in DB, update it
+            if (content) {
+              const { error: updateSourceError } = await supabaseClient
+                .from('sources')
+                .update({ content: content })
+                .eq('id', source.id);
+
+              if (updateSourceError) {
+                console.error(`Error updating source ${source.id} with file content:`, updateSourceError);
+              }
+            }
+          } else {
+            content = source.content; // Use existing content if available
+          }
+        } else if (source.type === 'application/pdf') {
+          // For PDFs, we strictly rely on the 'content' field being pre-populated by 'extract-pdf'
+          content = source.content;
+        }
+
+        if (content) {
+          extractedContents.push({ id: source.id, content, name: source.name, type: source.type });
         } else {
-          console.warn(`Could not get readable content for source ${source.id} (type: ${source.type}, name: ${source.name}). It might be a PDF not yet processed.`);
+          console.warn(`Could not get readable content for source ${source.id} (type: ${source.type}, name: ${source.name}). It might be a PDF not yet processed by 'extract-pdf' or an unsupported file type.`);
         }
       }
 
