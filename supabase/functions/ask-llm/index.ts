@@ -132,13 +132,14 @@ serve(async (req) => {
       parts.push({ text: "\n--- Provided Context ---" });
       for (const source of sources || []) {
         if (source.type === 'application/pdf' && source.storage_path) {
-          // For PDFs, provide the public URL directly to Gemini
+          // For PDFs, provide the public URL directly to Gemini as fileData
           const { data: publicUrlData } = supabaseClient.storage
             .from('chat-files')
             .getPublicUrl(source.storage_path);
           
           if (publicUrlData?.publicUrl) {
-            parts.push({ text: `Source (PDF): ${source.name}` });
+            // Add a generic text label for the PDF, without the URL or .pdf extension
+            parts.push({ text: `Source (Uploaded PDF File)` });
             parts.push({
               fileData: {
                 mimeType: "application/pdf",
@@ -173,12 +174,8 @@ serve(async (req) => {
           if (!content) { // If content not already extracted, process it
             // DOCX files are handled by 'extract-docx' and should have content pre-filled
             // For other text files, process directly
-            if (source.type.startsWith('text/') || source.name.endsWith('.txt') || source.name.endsWith('.csv')) {
+            if (source.type.startsWith('text/') || source.name.endsWith('.txt') || source.name.endsWith('.csv') || source.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
               content = await processTextFileContent(supabaseClient, source.storage_path);
-            } else if (source.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-              // This case should ideally not be hit if extract-docx successfully pre-fills content
-              console.warn(`ask-llm: DOCX file ${source.name} content not found in DB. It should have been extracted by 'extract-docx'.`);
-              parts.push({ text: `Warning: DOCX file ${source.name} content could not be retrieved.` });
             }
           }
           if (content) {
