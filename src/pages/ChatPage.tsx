@@ -187,12 +187,12 @@ const ChatPage = () => {
             .from("chat-files")
             .createSignedUrl(filePath, 3600); // URL valid for 1 hour
 
-          if (signedUrlError || !signedUrlData?.signedId) {
+          if (signedUrlError || !signedUrlData?.signedUrl) { // Corrected from signedId to signedUrl
             console.error("Error generating signed URL for PDF:", signedUrlError);
             showError(`Failed to generate URL for PDF ${file.name}.`);
             return null;
           }
-          const signedUrl = signedUrlData.signedId;
+          const signedUrl = signedUrlData.signedUrl;
 
           // Insert source entry as type 'url' with the signed URL
           const { data: sourceData, error: insertSourceError } = await supabase
