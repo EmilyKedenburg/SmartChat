@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.16.0';
 import { DOMParser } from "https://deno.land/x/deno_dom/deno-dom-wasm.ts";
-import { PDFDocument } from 'https://esm.sh/https://deno.land/x/pdf@v0.1.2/mod.ts'; // MODIFIED IMPORT for PDF parsing
+import pdfParse from 'https://esm.sh/pdf-parse@1.1.1'; // NEW IMPORT for pdf-parse
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -52,16 +52,11 @@ async function processFileContent(supabaseClient: any, filePath: string, fileTyp
     }
 
     if (fileType === 'application/pdf') {
-      // Handle PDF parsing
+      // Handle PDF parsing using pdf-parse
       const arrayBuffer = await data.arrayBuffer();
-      const pdfDoc = await PDFDocument.load(arrayBuffer);
-      let fullText = '';
-      for (let i = 1; i <= pdfDoc.getPageCount(); i++) {
-        const page = await pdfDoc.getPage(i);
-        const textContent = await page.getTextContent();
-        fullText += textContent.items.map(item => item.str).join(' ') + '\n';
-      }
-      return fullText.replace(/\s+/g, ' ').trim();
+      const buffer = new Uint8Array(arrayBuffer); // pdf-parse expects a Buffer or Uint8Array
+      const pdfData = await pdfParse(buffer);
+      return pdfData.text.replace(/\s+/g, ' ').trim();
     } else if (fileType.startsWith('text/') || fileType === 'application/json' || filePath.endsWith('.txt') || filePath.endsWith('.csv')) {
       // Handle plain text, CSV, etc.
       return await data.text();
