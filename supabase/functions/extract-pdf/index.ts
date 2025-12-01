@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import pdf from "npm:pdf-parse"; // Correct import for pdf-parse in Deno
+import { PDFDocument } from "https://deno.land/x/pdf_reader@v0.1.0/mod.ts"; // Using a Deno-native PDF reader
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -75,11 +75,15 @@ serve(async (req) => {
       });
     }
 
-    // Extract text using pdf-parse
+    // Extract text using deno-pdf-reader
     const arrayBuffer = await fileData.arrayBuffer();
-    const buffer = new Uint8Array(arrayBuffer);
-    const pdfData = await pdf(buffer);
-    const extractedText = pdfData.text.replace(/\s+/g, ' ').trim();
+    const pdfDoc = await PDFDocument.load(arrayBuffer);
+    let extractedText = "";
+    for (const page of pdfDoc.getPages()) {
+      // This is a basic text extraction. More complex PDFs might require advanced logic.
+      extractedText += page.getTextContent().items.map((item: any) => item.str).join(" ") + "\n";
+    }
+    extractedText = extractedText.replace(/\s+/g, ' ').trim();
 
     // Update the source record in the database with the extracted content
     const { error: updateSourceError } = await supabaseClient
