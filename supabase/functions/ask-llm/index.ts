@@ -2,57 +2,75 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.16.0';
 import { DOMParser } from "https://deno.land/x/deno_dom/deno-dom-wasm.ts";
-import type { Part } from 'https://esm.sh/@google/generative-ai@0.16.0'; // Import Part type for clarity
+import type { Part } from 'https://esm.sh/@google/generative-ai@0.16.0';
+
+// PDF.js imports for Deno
+import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.3.136/build/pdf.mjs";
+// Explicitly set workerSrc to an empty string to satisfy pdfjs-dist in Deno environment.
+// The .mjs build is designed to be worker-free, but it still checks this option.
+pdfjsLib.GlobalWorkerOptions.workerSrc = "";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Function to fetch and extract text content from a URL
-async function fetchUrlContent(url: string): Promise<string | null> {
+// Helper to extract text from PDF ArrayBuffer
+async function extractPdfContentFromBuffer(arrayBuffer: ArrayBuffer): Promise<string | null> {
+  try {
+    const uint8 = new Uint8Array(arrayBuffer);
+    const pdf = await pdfjsLib.getDocument({ data: uint8 }).promise;
+    let extractedText = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items.map((item: any) => item.str).join(" ");
+      extractedText += pageText + "\n\n";
+    }
+    return extractedText.replace(/\s+/g, ' ').trim();
+  } catch (error) {
+    console.error("Error extracting PDF content:", error);
+    return null;
+  }
+}
+
+// Function to fetch and extract text content from a URL, now handling PDFs
+async function fetchAndExtractUrlContent(url: string): Promise<string | null> {
   try {
     const response = await fetch(url);
     if (!response.ok) {
       console.warn(`Failed to fetch URL ${url}: ${response.statusText}`);
       return null;
     }
-    const html = await response.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, "text/html");
-    if (doc) {
-      // Extract text from common content elements, or fallback to body text
-      const contentElements = doc.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li, span");
-      let extractedText = "";
-      if (contentElements.length > 0) {
-        extractedText = Array.from(contentElements).map(el => el.textContent).join("\n");
-      } else {
-        extractedText = doc.body?.textContent || "";
+
+    const contentType = response.headers.get("Content-Type");
+
+    if (contentType?.includes("application/pdf") || url.toLowerCase().endsWith(".pdf")) {
+      const arrayBuffer = await response.arrayBuffer();
+      return await extractPdfContentFromBuffer(arrayBuffer);
+    } else if (contentType?.includes("text/html")) {
+      const html = await response.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+      if (doc) {
+        const contentElements = doc.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li, span");
+        let extractedText = "";
+        if (contentElements.length > 0) {
+          extractedText = Array.from(contentElements).map(el => el.textContent).join("\n");
+        } else {
+          extractedText = doc.body?.textContent || "";
+        }
+        return extractedText.replace(/\s+/g, ' ').trim();
       }
-      // Basic cleanup: remove excessive whitespace and newlines
-      return extractedText.replace(/\s+/g, ' ').trim();
+      return null;
+    } else if (contentType?.includes("text/plain") || contentType?.includes("text/csv")) {
+      return await response.text();
+    } else {
+      console.warn(`Unsupported content type for URL ${url}: ${contentType}`);
+      return null;
     }
-    return null;
   } catch (error) {
     console.error(`Error fetching or parsing URL ${url}:`, error);
-    return null;
-  }
-}
-
-// Function to process text-based file content (used for simple text files if content isn't pre-filled)
-async function processTextFileContent(supabaseClient: any, filePath: string): Promise<string | null> {
-  try {
-    const { data, error } = await supabaseClient.storage.from('chat-files').download(filePath);
-    if (error) {
-      console.error(`Error downloading file ${filePath}:`, error);
-      return null;
-    }
-    if (!data) {
-      return null;
-    }
-    return await data.text();
-  } catch (error) {
-    console.error(`ask-llm: Error processing text file ${filePath}:`, error);
     return null;
   }
 }
@@ -134,8 +152,8 @@ serve(async (req) => {
         let content = source.content; // Assume content is pre-extracted for files or fetched for URLs
 
         if (source.type === 'url') {
-          if (!content) { // If content not already extracted, fetch it
-            content = await fetchUrlContent(source.name);
+          if (!content) { // If content not already extracted, fetch and extract it
+            content = await fetchAndExtractUrlContent(source.name);
             if (content) {
               const { error: updateSourceError } = await supabaseClient
                 .from('sources')
@@ -150,14 +168,31 @@ serve(async (req) => {
             console.warn(`Could not get readable content for URL source ${source.id} (${source.name}).`);
             parts.push({ text: `Warning: Could not access URL source ${source.name}.` });
           }
-        } else if (source.storage_path) { // For file types (txt, csv, docx, pdf)
-          if (!content) { // If content not already extracted, process it (should be rare for docx/pdf now)
+        } else if (source.storage_path) { // For file types (txt, csv, docx)
+          // For file types, content should ideally be pre-extracted by dedicated functions (e.g., extract-docx)
+          // or read client-side (for text files). If not, it's a fallback.
+          if (!content) {
             // This block is primarily for simple text files if content wasn't read client-side
+            // or if extract-docx failed to update content.
+            // For PDFs, they are now handled as 'url' type.
             if (source.type.startsWith('text/') || source.name.endsWith('.txt') || source.name.endsWith('.csv')) {
-              content = await processTextFileContent(supabaseClient, source.storage_path);
+              // If content is still missing for a simple text file, try to download and process
+              try {
+                const { data: fileData, error: downloadError } = await supabaseClient.storage.from('chat-files').download(source.storage_path);
+                if (downloadError) throw downloadError;
+                if (fileData) {
+                  content = await fileData.text();
+                  const { error: updateContentError } = await supabaseClient
+                    .from('sources')
+                    .update({ content: content })
+                    .eq('id', source.id);
+                  if (updateContentError) console.error(`Error updating source ${source.id} with text content:`, updateContentError);
+                }
+              } catch (downloadOrReadError) {
+                console.error(`ask-llm: Error processing text file ${source.storage_path}:`, downloadOrReadError);
+              }
             } else {
-              console.warn(`ask-llm: File ${source.name} (${source.type}) content not found in DB. It should have been extracted by a dedicated function.`);
-              parts.push({ text: `Warning: File ${source.name} content could not be retrieved.` });
+              console.warn(`ask-llm: File ${source.name} (${source.type}) content not found in DB and no specific fallback for this type.`);
             }
           }
           if (content) {
