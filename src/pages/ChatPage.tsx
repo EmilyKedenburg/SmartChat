@@ -96,7 +96,7 @@ const ChatPage = () => {
 
       const processingPromises = filesToProcess.map(async (file, index) => {
         const updatedFile = { ...file };
-        if (file.type === 'application/pdf') {
+        if (file.type && file.type === 'application/pdf') {
           updatedFile.isProcessing = true;
           setProcessedFiles(prev => prev.map(f => f === file ? updatedFile : f)); // Update processing state
           try {
@@ -116,7 +116,7 @@ const ChatPage = () => {
             updatedFile.isProcessing = false;
             setProcessedFiles(prev => prev.map(f => f === file ? updatedFile : f)); // Update final state
           }
-        } else if (file.type.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv')) {
+        } else if (file.type && (file.type.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv'))) {
           try {
             updatedFile.extractedContent = await file.text();
             showSuccess(`Text file ${file.name} content read.`);
@@ -249,7 +249,7 @@ const ChatPage = () => {
 
         let sourceIdToReturn = null;
 
-        if (file.type === 'application/pdf') {
+        if (file.type && file.type === 'application/pdf') {
           // Generate a signed URL for the uploaded PDF
           const { data: signedUrlData, error: signedUrlError } = await supabase.storage
             .from("chat-files")
@@ -277,7 +277,7 @@ const ChatPage = () => {
           showSuccess(`PDF file ${file.name} uploaded and registered as a URL source.`);
           sourceIdToReturn = sourceData.id;
 
-        } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        } else if (file.type && file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
           // Existing DOCX logic
           const { data: sourceData, error: insertSourceError } = await supabase
             .from("sources")
@@ -315,7 +315,7 @@ const ChatPage = () => {
           }
           sourceIdToReturn = sourceData.id;
 
-        } else if (file.type.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv')) {
+        } else if (file.type && (file.type.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv'))) {
           // Existing text file logic, now using pre-extracted content
           const { data: sourceData, error: insertSourceError } = await supabase
             .from("sources")
