@@ -2,7 +2,11 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.16.0';
 import { DOMParser } from "https://deno.land/x/deno_dom/deno-dom-wasm.ts";
-import { PDFDocument } from 'https://deno.land/x/pdf@v0.1.2/mod.ts'; // Re-introducing Deno-native PDF parsing library
+import * as pdfjsLib from 'https://esm.sh/pdfjs-dist@4.4.168/build/pdf.mjs'; // NEW: pdfjs-dist
+
+// Set the worker source for pdf.js, required for its operation.
+// This needs to be done once when the module is loaded.
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://esm.sh/pdfjs-dist@4.4.168/build/pdf.worker.mjs';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -52,14 +56,15 @@ async function processFileContent(supabaseClient: any, filePath: string, fileTyp
     }
 
     if (fileType === 'application/pdf') {
-      // Handle PDF parsing using deno.land/x/pdf
       const arrayBuffer = await data.arrayBuffer();
-      const pdfDoc = await PDFDocument.load(arrayBuffer);
+      
+      // Use pdfjs-dist to load and extract text from the PDF
+      const pdfDocument = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
       let fullText = '';
-      for (let i = 1; i <= pdfDoc.getPageCount(); i++) {
-        const page = await pdfDoc.getPage(i);
+      for (let i = 1; i <= pdfDocument.numPages; i++) {
+        const page = await pdfDocument.getPage(i);
         const textContent = await page.getTextContent();
-        fullText += textContent.items.map(item => item.str).join(' ') + '\n';
+        fullText += textContent.items.map((item: any) => item.str).join(' ') + '\n';
       }
       return fullText.replace(/\s+/g, ' ').trim();
     } else if (fileType.startsWith('text/') || fileType === 'application/json' || filePath.endsWith('.txt') || filePath.endsWith('.csv')) {
@@ -143,7 +148,6 @@ serve(async (req) => {
         if (source.type === 'url') {
           content = await fetchUrlContent(source.name);
         } else if (source.storage_path) { // Assuming files have storage_path
-          // MODIFIED: Use the new processFileContent function
           content = await processFileContent(supabaseClient, source.storage_path, source.type);
         }
 
