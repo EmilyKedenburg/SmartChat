@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.16.0';
 import { DOMParser } from "https://deno.land/x/deno_dom/deno-dom-wasm.ts";
-// Removed pdf-parse and pdfjs-dist imports as they are incompatible with Deno Edge Functions.
+import type { Part } from 'https://esm.sh/@google/generative-ai@0.16.0'; // Import Part type for clarity
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -39,8 +39,8 @@ async function fetchUrlContent(url: string): Promise<string | null> {
   }
 }
 
-// Function to process file content (excluding PDF for now)
-async function processFileContent(supabaseClient: any, filePath: string, fileType: string): Promise<string | null> {
+// Function to process text-based file content
+async function processTextFileContent(supabaseClient: any, filePath: string): Promise<string | null> {
   try {
     const { data, error } = await supabaseClient.storage.from('chat-files').download(filePath);
     if (error) {
@@ -50,21 +50,9 @@ async function processFileContent(supabaseClient: any, filePath: string, fileTyp
     if (!data) {
       return null;
     }
-
-    // PDF handling removed due to Deno runtime incompatibility
-    if (fileType.startsWith('text/') || fileType === 'application/json' || filePath.endsWith('.txt') || filePath.endsWith('.csv')) {
-      return await data.text();
-    } else if (fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-      // DOCX files are handled by the 'extract-docx' Edge Function, so this branch should ideally not be reached for them.
-      // If it is, we cannot process it here directly.
-      console.warn(`ask-llm: DOCX file ${filePath} should be processed by 'extract-docx', not here.`);
-      return null;
-    } else {
-      console.warn(`ask-llm: Unsupported file type for direct content extraction: ${fileType} for file ${filePath}.`);
-      return null;
-    }
+    return await data.text();
   } catch (error) {
-    console.error(`ask-llm: Error processing file ${filePath} (${fileType}):`, error);
+    console.error(`ask-llm: Error processing text file ${filePath}:`, error);
     return null;
   }
 }
@@ -115,9 +103,18 @@ serve(async (req) => {
     const genAI = new GoogleGenerativeAI(LLM_API_KEY);
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-    let context = "";
-    const extractedContents: { id: string; content: string; name: string; type: string }[] = [];
+    const parts: Part[] = [];
 
+    // Add conversation history to parts
+    if (conversationHistory && conversationHistory.length > 0) {
+      parts.push({ text: "--- Conversation History ---" });
+      conversationHistory.forEach((msg: { role: string; content: string }) => {
+        parts.push({ text: `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}` });
+      });
+      parts.push({ text: "----------------------------" });
+    }
+
+    // Process sources
     if (sourceIds && sourceIds.length > 0) {
       const { data: sources, error: fetchSourcesError } = await supabaseClient
         .from('sources')
@@ -132,81 +129,78 @@ serve(async (req) => {
         });
       }
 
+      parts.push({ text: "\n--- Provided Context ---" });
       for (const source of sources || []) {
-        let content: string | null = null;
-        // Prioritize already extracted content from the database
-        if (source.content) {
-          content = source.content;
-        } else if (source.type === 'url') {
-          content = await fetchUrlContent(source.name);
-          // If content was fetched from URL and not already in DB, update it
-          if (content && !source.content) {
-            const { error: updateSourceError } = await supabaseClient
-              .from('sources')
-              .update({ content: content })
-              .eq('id', source.id);
-
-            if (updateSourceError) {
-              console.error(`Error updating source ${source.id} with URL content:`, updateSourceError);
-            }
+        if (source.type === 'application/pdf' && source.storage_path) {
+          // For PDFs, provide the public URL directly to Gemini
+          const { data: publicUrlData } = supabaseClient.storage
+            .from('chat-files')
+            .getPublicUrl(source.storage_path);
+          
+          if (publicUrlData?.publicUrl) {
+            parts.push({ text: `Source (PDF): ${source.name}` });
+            parts.push({
+              fileData: {
+                mimeType: "application/pdf",
+                fileUri: publicUrlData.publicUrl,
+              },
+            });
+            console.log(`ask-llm: Added PDF fileData for ${source.name} with URL: ${publicUrlData.publicUrl}`);
+          } else {
+            console.warn(`ask-llm: Could not get public URL for PDF source ${source.id} at ${source.storage_path}.`);
+            parts.push({ text: `Warning: Could not access PDF source ${source.name}.` });
           }
-        } else if (source.storage_path) { // Handle all files with storage_path here
-          if (!source.content) {
-            content = await processFileContent(supabaseClient, source.storage_path, source.type);
-            // If content was processed from file and not already in DB, update it
+        } else if (source.type === 'url') {
+          let content = source.content;
+          if (!content) { // If content not already extracted, fetch it
+            content = await fetchUrlContent(source.name);
             if (content) {
               const { error: updateSourceError } = await supabaseClient
                 .from('sources')
                 .update({ content: content })
                 .eq('id', source.id);
-
-              if (updateSourceError) {
-                console.error(`Error updating source ${source.id} with file content:`, updateSourceError);
-              }
+              if (updateSourceError) console.error(`Error updating source ${source.id} with URL content:`, updateSourceError);
             }
+          }
+          if (content) {
+            parts.push({ text: `Source (URL): ${source.name}\n${content}` });
           } else {
-            content = source.content; // Use existing content if available
+            console.warn(`Could not get readable content for URL source ${source.id} (${source.name}).`);
+            parts.push({ text: `Warning: Could not access URL source ${source.name}.` });
+          }
+        } else if (source.storage_path) { // For other file types (txt, csv, docx)
+          let content = source.content;
+          if (!content) { // If content not already extracted, process it
+            // DOCX files are handled by 'extract-docx' and should have content pre-filled
+            // For other text files, process directly
+            if (source.type.startsWith('text/') || source.name.endsWith('.txt') || source.name.endsWith('.csv')) {
+              content = await processTextFileContent(supabaseClient, source.storage_path);
+            } else if (source.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+              // This case should ideally not be hit if extract-docx successfully pre-fills content
+              console.warn(`ask-llm: DOCX file ${source.name} content not found in DB. It should have been extracted by 'extract-docx'.`);
+              parts.push({ text: `Warning: DOCX file ${source.name} content could not be retrieved.` });
+            }
+          }
+          if (content) {
+            parts.push({ text: `Source (File): ${source.name}\n${content}` });
+          } else {
+            console.warn(`Could not get readable content for file source ${source.id} (${source.name}).`);
+            parts.push({ text: `Warning: Could not access file source ${source.name}.` });
           }
         }
-
-        if (content) {
-          extractedContents.push({ id: source.id, content, name: source.name, type: source.type });
-        } else {
-          console.warn(`Could not get readable content for source ${source.id} (type: ${source.type}, name: ${source.name}).`);
-        }
       }
-
-      if (extractedContents.length > 0) {
-        context += `\n\n--- Provided Context ---\n`;
-        extractedContents.forEach((item) => {
-          context += `\nSource (${item.type === 'url' ? 'URL' : 'File'}): ${item.name}\n${item.content}\n`;
-        });
-        context += `\n-------------------------\n`;
-      } else {
-        context += `\n\n--- Provided Context ---\n`;
-        context += `No readable content was extracted from the provided sources.\n`;
-        context += `\n-------------------------\n`;
-      }
+      parts.push({ text: "-------------------------" });
+    } else {
+      parts.push({ text: "\n--- Provided Context ---" });
+      parts.push({ text: "No readable content was extracted from the provided sources." });
+      parts.push({ text: "-------------------------" });
     }
 
-    let chatHistory = "";
-    if (conversationHistory && conversationHistory.length > 0) {
-      chatHistory += "\n\n--- Conversation History ---\n";
-      conversationHistory.forEach((msg: { role: string; content: string }) => {
-        chatHistory += `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}\n`;
-      });
-      chatHistory += "----------------------------\n";
-    }
+    // Add the user's current question
+    parts.push({ text: `Question: ${question}` });
+    parts.push({ text: `Please provide a concise and helpful answer. If you directly reference information from the provided URLs or files, try to cite the source in your response.` });
 
-    const prompt = `You are a helpful assistant that answers questions based on provided context and conversation history.
-    ${chatHistory}
-    ${context}
-    
-    Question: ${question}
-    
-    Please provide a concise and helpful answer. If you directly reference information from the provided URLs or files, try to cite the source in your response.`;
-
-    const result = await model.generateContent(prompt);
+    const result = await model.generateContent({ contents: [{ role: "user", parts }] });
     const response = await result.response;
     const assistantResponse = response.text();
 

@@ -14,7 +14,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { showSuccess, showError } from "@/utils/toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } => "@/components/ui/dialog";
 import SourceDisplay from "@/components/SourceDisplay";
 
 interface Message {
@@ -197,8 +197,8 @@ const ChatPage = () => {
 
         // Determine which Edge Function to invoke based on file type
         if (file.type === 'application/pdf') {
-          showError(`PDF file ${file.name} uploaded, but PDF processing is currently unsupported.`);
-          return null; // Do not add PDF source to LLM context for now
+          // PDFs are now handled by Gemini directly via URL, no client-side extraction needed
+          showSuccess(`PDF file ${file.name} uploaded. Content will be processed by AI via URL.`);
         } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
           const { data: extractData, error } = await supabase.functions.invoke("extract-docx", {
             body: { sourceId: sourceData.id },
@@ -220,7 +220,7 @@ const ChatPage = () => {
           return null; // Do not add source if type is unsupported
         }
 
-        // Update the source with the extracted content if available
+        // Update the source with the extracted content if available (for non-PDFs)
         if (extractedContent && !edgeFunctionError) {
           const { error: updateContentError } = await supabase
             .from("sources")
@@ -232,8 +232,8 @@ const ChatPage = () => {
             showError(`Failed to save extracted content for ${file.name}.`);
             return null;
           }
-        } else if (edgeFunctionError) {
-          return null; // If extraction failed, don't add this source to the LLM context
+        } else if (edgeFunctionError && file.type !== 'application/pdf') { // Only return null if extraction failed for non-PDFs
+          return null; 
         }
         
         return sourceData.id; // Return the source ID for successful processing
@@ -431,7 +431,7 @@ const ChatPage = () => {
             {/* File Upload */}
             <div>
               <Label htmlFor="file-upload" className="text-sm font-medium mb-2 block">
-                Upload Files (Supported: .txt, .csv, .docx)
+                Upload Files (Supported: .txt, .pdf, .csv, .docx)
               </Label>
               <Input
                 id="file-upload"
@@ -481,7 +481,7 @@ const ChatPage = () => {
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => handleAddUrl()}
+                        onClick={() => handleRemoveUrl(index)}
                         className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
                         disabled={isLoadingResponse}
                       >
