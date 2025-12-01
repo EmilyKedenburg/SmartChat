@@ -197,8 +197,8 @@ const ChatPage = () => {
 
         // Determine which Edge Function to invoke based on file type
         if (file.type === 'application/pdf') {
-          // PDF extraction will now be handled by ask-llm directly
-          showSuccess(`PDF file ${file.name} uploaded. Content will be processed by AI.`);
+          showError(`PDF file ${file.name} uploaded, but PDF processing is currently unsupported.`);
+          return null; // Do not add PDF source to LLM context for now
         } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
           const { data: extractData, error } = await supabase.functions.invoke("extract-docx", {
             body: { sourceId: sourceData.id },
@@ -431,7 +431,7 @@ const ChatPage = () => {
             {/* File Upload */}
             <div>
               <Label htmlFor="file-upload" className="text-sm font-medium mb-2 block">
-                Upload Files (Supported: .txt, .pdf, .csv, .docx)
+                Upload Files (Supported: .txt, .csv, .docx)
               </Label>
               <Input
                 id="file-upload"
@@ -481,7 +481,7 @@ const ChatPage = () => {
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => handleRemoveUrl(index)}
+                        onClick={() => handleAddUrl()}
                         className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
                         disabled={isLoadingResponse}
                       >

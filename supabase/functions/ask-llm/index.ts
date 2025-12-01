@@ -2,8 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.16.0';
 import { DOMParser } from "https://deno.land/x/deno_dom/deno-dom-wasm.ts";
-// Importing pdf-parse for PDF extraction, as per user's suggestion.
-import parsePdf from 'https://esm.sh/pdf-parse@1.1.1'; 
+// Removed pdf-parse and pdfjs-dist imports as they are incompatible with Deno Edge Functions.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -40,7 +39,7 @@ async function fetchUrlContent(url: string): Promise<string | null> {
   }
 }
 
-// Function to process file content, now using pdf-parse for PDF extraction
+// Function to process file content (excluding PDF for now)
 async function processFileContent(supabaseClient: any, filePath: string, fileType: string): Promise<string | null> {
   try {
     const { data, error } = await supabaseClient.storage.from('chat-files').download(filePath);
@@ -52,16 +51,14 @@ async function processFileContent(supabaseClient: any, filePath: string, fileTyp
       return null;
     }
 
-    if (fileType === 'application/pdf') {
-      console.log(`ask-llm: Starting PDF text extraction for ${filePath} using pdf-parse...`);
-      const arrayBuffer = await data.arrayBuffer();
-      // pdf-parse expects a Buffer or ArrayBuffer
-      const pdf = await parsePdf(arrayBuffer); 
-      const extractedText = pdf.text.replace(/\s+/g, ' ').trim();
-      console.log(`ask-llm: PDF text extraction complete for ${filePath}. Length: ${extractedText.length}`);
-      return extractedText;
-    } else if (fileType.startsWith('text/') || fileType === 'application/json' || filePath.endsWith('.txt') || filePath.endsWith('.csv')) {
+    // PDF handling removed due to Deno runtime incompatibility
+    if (fileType.startsWith('text/') || fileType === 'application/json' || filePath.endsWith('.txt') || filePath.endsWith('.csv')) {
       return await data.text();
+    } else if (fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      // DOCX files are handled by the 'extract-docx' Edge Function, so this branch should ideally not be reached for them.
+      // If it is, we cannot process it here directly.
+      console.warn(`ask-llm: DOCX file ${filePath} should be processed by 'extract-docx', not here.`);
+      return null;
     } else {
       console.warn(`ask-llm: Unsupported file type for direct content extraction: ${fileType} for file ${filePath}.`);
       return null;
