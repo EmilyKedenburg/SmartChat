@@ -1,23 +1,30 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import * as pdfjsLib from 'https://esm.sh/pdfjs-dist@4.4.168';
-import { TextItem } from 'https://esm.sh/pdfjs-dist@4.4.168/types/src/display/api';
+// Directly import getDocument and GlobalWorkerOptions from the server-friendly build
+import { getDocument, GlobalWorkerOptions } from 'https://esm.sh/pdfjs-dist@4.4.168/build/pdf.mjs';
+import type { TextItem } from 'https://esm.sh/pdfjs-dist@4.4.168/types/src/display/api';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-
 serve(async (req) => {
+  // Handle CORS preflight request
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   console.log("extract-pdf: Function started.");
+  console.log("extract-pdf: pdfjs-dist modules imported.");
 
   try {
+    // IMPORTANT: Disable web workers for pdfjs-dist in Deno environment
+    // This forces PDF.js to run in the main thread, avoiding worker module loading issues.
+    GlobalWorkerOptions.workerSrc = '';
+    console.log("extract-pdf: GlobalWorkerOptions.workerSrc set to empty string.");
+
+    // Initialize Supabase client with the user's auth token
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
@@ -46,6 +53,7 @@ serve(async (req) => {
       });
     }
 
+    // Fetch the source record
     const { data: source, error: fetchSourceError } = await supabaseClient
       .from('sources')
       .select('*')
@@ -69,6 +77,7 @@ serve(async (req) => {
       });
     }
 
+    // Download the PDF file from Supabase Storage
     const { data: fileData, error: downloadError } = await supabaseClient.storage
       .from('chat-files')
       .download(source.storage_path);
@@ -82,12 +91,14 @@ serve(async (req) => {
     }
     console.log(`extract-pdf: PDF file downloaded successfully from ${source.storage_path}. File size: ${fileData.size} bytes.`);
 
+    // Extract text using pdfjs-dist
     const arrayBuffer = await fileData.arrayBuffer();
     console.log("extract-pdf: Starting PDF text extraction...");
-    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const loadingTask = getDocument({ data: arrayBuffer }); // Use getDocument directly
+    console.log("extract-pdf: PDF loading task created.");
     const pdfDocument = await loadingTask.promise;
+    console.log(`extract-pdf: PDF document loaded. Has ${pdfDocument.numPages} pages.`);
     let extractedText = "";
-    console.log(`extract-pdf: PDF has ${pdfDocument.numPages} pages.`);
 
     for (let i = 1; i <= pdfDocument.numPages; i++) {
       const page = await pdfDocument.getPage(i);
