@@ -59,10 +59,9 @@ serve(async (req) => {
   try {
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '', // Use service role to bypass RLS for guest data
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
     );
 
-    // Parse the request body
     const { question, sourceIds, messages: conversationHistory } = await req.json();
 
     if (!question && (!sourceIds || sourceIds.length === 0)) {
@@ -81,16 +80,17 @@ serve(async (req) => {
     }
 
     const genAI = new GoogleGenerativeAI(LLM_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); // Fixed model name
+    // Using gemini-pro as it's the most stable model across API versions
+    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
     const parts: Part[] = [];
 
     if (conversationHistory && conversationHistory.length > 0) {
-      parts.push({ text: "--- Conversation History ---" });
+      parts.push({ text: "--- Conversation History ---\n" });
       conversationHistory.forEach((msg: { role: string; content: string }) => {
-        parts.push({ text: `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}` });
+        parts.push({ text: `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}\n` });
       });
-      parts.push({ text: "----------------------------" });
+      parts.push({ text: "----------------------------\n" });
     }
 
     if (sourceIds && sourceIds.length > 0) {
@@ -103,23 +103,9 @@ serve(async (req) => {
         console.error("[ask-llm] Error fetching sources:", fetchSourcesError);
       }
 
-      parts.push({ text: "\n--- Provided Context ---" });
+      parts.push({ text: "\n--- Provided Context ---\n" });
       for (const source of sources || []) {
-        if (source.type === 'application/pdf' && source.storage_path) {
-          const { data: publicUrlData } = supabaseClient.storage
-            .from('chat-files')
-            .getPublicUrl(source.storage_path);
-          
-          if (publicUrlData?.publicUrl) {
-            parts.push({ text: `Source (PDF): ${source.name}` });
-            parts.push({
-              fileData: {
-                mimeType: "application/pdf",
-                fileUri: publicUrlData.publicUrl,
-              },
-            });
-          }
-        } else if (source.type === 'url') {
+        if (source.type === 'url') {
           let content = source.content;
           if (!content) {
             content = await fetchUrlContent(source.name);
@@ -127,7 +113,7 @@ serve(async (req) => {
               await supabaseClient.from('sources').update({ content: content }).eq('id', source.id);
             }
           }
-          if (content) parts.push({ text: `Source (URL): ${source.name}\n${content}` });
+          if (content) parts.push({ text: `Source (URL): ${source.name}\nContent: ${content}\n` });
         } else if (source.storage_path) {
           let content = source.content;
           if (!content) {
@@ -135,14 +121,14 @@ serve(async (req) => {
               content = await processTextFileContent(supabaseClient, source.storage_path);
             }
           }
-          if (content) parts.push({ text: `Source (File): ${source.name}\n${content}` });
+          if (content) parts.push({ text: `Source (File): ${source.name}\nContent: ${content}\n` });
         }
       }
-      parts.push({ text: "-------------------------" });
+      parts.push({ text: "-------------------------\n" });
     }
 
     parts.push({ text: `Question: ${question}` });
-    parts.push({ text: `Please provide a concise and helpful answer. Cite sources if possible.` });
+    parts.push({ text: `\nPlease provide a concise and helpful answer based on the context provided above. Cite sources if possible.` });
 
     const result = await model.generateContent({ contents: [{ role: "user", parts }] });
     const response = await result.response;
