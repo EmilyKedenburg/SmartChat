@@ -97,12 +97,15 @@ const ChatPage = () => {
     }
 
     setIsLoadingResponse(true);
+    console.log("Submitting chat request...", { trimmedQuestion, filesCount: files.length, urlsCount: filteredUrls.length });
 
     try {
       let currentChat = currentChatId;
       let allSourceIdsForLLM: string[] = [];
 
+      // 1. Ensure we have a chat ID
       if (!currentChat) {
+        console.log("Creating new chat...");
         const { data: newChat, error: chatError } = await supabase
           .from("chats")
           .insert({ user_id: userId, title: trimmedQuestion.substring(0, 50) || "New Chat" })
@@ -112,18 +115,23 @@ const ChatPage = () => {
         if (chatError) throw chatError;
         currentChat = newChat.id;
         setCurrentChatId(newChat.id);
+        console.log("New chat created:", currentChat);
       } else {
+        console.log("Using existing chat:", currentChat);
+        // Fetch existing sources for this chat to maintain context
         const { data: existingSources, error: fetchExistingSourcesError } = await supabase
           .from("sources")
           .select("id")
           .eq("chat_id", currentChat)
           .eq("user_id", userId);
 
-        if (!fetchExistingSourcesError) {
-          allSourceIdsForLLM = existingSources?.map(s => s.id) || [];
+        if (!fetchExistingSourcesError && existingSources) {
+          allSourceIdsForLLM = existingSources.map(s => s.id);
+          console.log("Fetched existing source IDs:", allSourceIdsForLLM);
         }
       }
 
+      // 2. Add user message to UI and DB
       const userMessage: Message = {
         id: crypto.randomUUID(),
         content: trimmedQuestion,
@@ -136,58 +144,79 @@ const ChatPage = () => {
         .from("messages")
         .insert({ chat_id: currentChat, user_id: userId, content: trimmedQuestion, role: "user" });
 
+      // 3. Process new files
       const fileProcessingPromises = files.map(async (file) => {
-        const filePath = `${userId}/${currentChat}/${file.name}`;
+        console.log(`Uploading file: ${file.name}`);
+        const filePath = `${userId}/${currentChat}/${Date.now()}_${file.name}`;
         const { error: uploadError } = await supabase.storage
           .from("chat-files")
           .upload(filePath, file, { upsert: true });
 
-        if (uploadError) return null;
+        if (uploadError) {
+          console.error(`Upload error for ${file.name}:`, uploadError);
+          return null;
+        }
 
         const { data: sourceData, error: insertSourceError } = await supabase
           .from("sources")
-          .insert({ chat_id: currentChat, user_id: userId, type: file.type || "application/octet-stream", name: file.name, storage_path: filePath })
+          .insert({ 
+            chat_id: currentChat, 
+            user_id: userId, 
+            type: file.type || "application/octet-stream", 
+            name: file.name, 
+            storage_path: filePath 
+          })
           .select("id")
           .single();
 
-        if (insertSourceError) return null;
-
-        if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-          const { data: extractData } = await supabase.functions.invoke("extract-docx", {
-            body: { sourceId: sourceData.id },
-          });
-          if (extractData?.extractedContent) {
-            await supabase.from("sources").update({ content: extractData.extractedContent }).eq("id", sourceData.id);
-          }
+        if (insertSourceError) {
+          console.error(`Insert source error for ${file.name}:`, insertSourceError);
+          return null;
         }
-        
+
+        console.log(`File ${file.name} processed, source ID: ${sourceData.id}`);
         return sourceData.id;
       });
 
       const newFileSourceIds = (await Promise.all(fileProcessingPromises)).filter(Boolean) as string[];
       allSourceIdsForLLM.push(...newFileSourceIds);
 
+      // 4. Process new URLs
       const urlProcessingPromises = filteredUrls.map(async (url) => {
+        console.log(`Adding URL source: ${url}`);
         const { data: sourceData, error: insertSourceError } = await supabase
           .from("sources")
-          .insert({ chat_id: currentChat, user_id: userId, type: "url", name: url, content: url })
+          .insert({ 
+            chat_id: currentChat, 
+            user_id: userId, 
+            type: "url", 
+            name: url 
+          })
           .select("id")
           .single();
 
-        if (insertSourceError) return null;
+        if (insertSourceError) {
+          console.error(`Insert source error for URL ${url}:`, insertSourceError);
+          return null;
+        }
+
+        console.log(`URL ${url} processed, source ID: ${sourceData.id}`);
         return sourceData.id;
       });
 
       const newUrlSourceIds = (await Promise.all(urlProcessingPromises)).filter(Boolean) as string[];
       allSourceIdsForLLM.push(...newUrlSourceIds);
 
+      // 5. Deduplicate and prepare for LLM
       allSourceIdsForLLM = Array.from(new Set(allSourceIdsForLLM));
+      console.log("Final source IDs being sent to LLM:", allSourceIdsForLLM);
 
       const conversationHistoryForLLM = messages.slice(-10).map(msg => ({
         role: msg.role,
         content: msg.content,
       }));
 
+      // 6. Invoke Edge Function
       const { data, error: edgeFunctionError } = await supabase.functions.invoke("ask-llm", {
         body: {
           question: trimmedQuestion,
@@ -196,10 +225,13 @@ const ChatPage = () => {
         },
       });
 
-      if (edgeFunctionError || data.error) throw new Error(edgeFunctionError?.message || data.error);
+      if (edgeFunctionError || data?.error) {
+        throw new Error(edgeFunctionError?.message || data?.error || "Unknown error from AI function");
+      }
 
       const assistantResponseContent = data.response || "No response from LLM.";
 
+      // 7. Add assistant message to UI and DB
       const assistantMessage: Message = {
         id: crypto.randomUUID(),
         content: assistantResponseContent,
@@ -212,13 +244,14 @@ const ChatPage = () => {
         .from("messages")
         .insert({ chat_id: currentChat, user_id: userId, content: assistantResponseContent, role: "assistant" });
 
+      // 8. Reset inputs
       setQuestion("");
       setFiles([]);
       setUrls([""]);
       showSuccess("Response received!");
 
     } catch (error: any) {
-      console.error("Chat error:", error);
+      console.error("Chat submission error:", error);
       showError(`Failed to get response: ${error.message}`);
     } finally {
       setIsLoadingResponse(false);
