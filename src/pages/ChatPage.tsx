@@ -97,7 +97,7 @@ const ChatPage = () => {
     }
 
     setIsLoadingResponse(true);
-    console.log("Submitting chat request...", { trimmedQuestion, filesCount: files.length, urlsCount: filteredUrls.length });
+    console.log("Submitting chat request...", { userId, trimmedQuestion, filesCount: files.length, urlsCount: filteredUrls.length });
 
     try {
       let currentChat = currentChatId;
@@ -112,7 +112,10 @@ const ChatPage = () => {
           .select()
           .single();
 
-        if (chatError) throw chatError;
+        if (chatError) {
+          console.error("Error creating chat:", chatError);
+          throw new Error(`Failed to create chat: ${chatError.message}`);
+        }
         currentChat = newChat.id;
         setCurrentChatId(newChat.id);
         console.log("New chat created:", currentChat);
@@ -140,9 +143,13 @@ const ChatPage = () => {
       };
       setMessages((prev) => [...prev, userMessage]);
 
-      await supabase
+      const { error: msgError } = await supabase
         .from("messages")
         .insert({ chat_id: currentChat, user_id: userId, content: trimmedQuestion, role: "user" });
+      
+      if (msgError) {
+        console.error("Error saving user message:", msgError);
+      }
 
       // 3. Process new files
       const fileProcessingPromises = files.map(async (file) => {
@@ -154,9 +161,11 @@ const ChatPage = () => {
 
         if (uploadError) {
           console.error(`Upload error for ${file.name}:`, uploadError);
+          showError(`Failed to upload ${file.name}: ${uploadError.message}`);
           return null;
         }
 
+        console.log(`File ${file.name} uploaded, creating source record...`);
         const { data: sourceData, error: insertSourceError } = await supabase
           .from("sources")
           .insert({ 
@@ -171,6 +180,7 @@ const ChatPage = () => {
 
         if (insertSourceError) {
           console.error(`Insert source error for ${file.name}:`, insertSourceError);
+          showError(`Failed to register source ${file.name}: ${insertSourceError.message}`);
           return null;
         }
 
@@ -197,6 +207,7 @@ const ChatPage = () => {
 
         if (insertSourceError) {
           console.error(`Insert source error for URL ${url}:`, insertSourceError);
+          showError(`Failed to register URL ${url}: ${insertSourceError.message}`);
           return null;
         }
 
@@ -217,6 +228,7 @@ const ChatPage = () => {
       }));
 
       // 6. Invoke Edge Function
+      console.log("Invoking ask-llm Edge Function...");
       const { data, error: edgeFunctionError } = await supabase.functions.invoke("ask-llm", {
         body: {
           question: trimmedQuestion,
@@ -226,10 +238,12 @@ const ChatPage = () => {
       });
 
       if (edgeFunctionError || data?.error) {
+        console.error("Edge Function error:", edgeFunctionError || data?.error);
         throw new Error(edgeFunctionError?.message || data?.error || "Unknown error from AI function");
       }
 
       const assistantResponseContent = data.response || "No response from LLM.";
+      console.log("Received assistant response.");
 
       // 7. Add assistant message to UI and DB
       const assistantMessage: Message = {
@@ -240,9 +254,13 @@ const ChatPage = () => {
       };
       setMessages((prev) => [...prev, assistantMessage]);
 
-      await supabase
+      const { error: assistantMsgError } = await supabase
         .from("messages")
         .insert({ chat_id: currentChat, user_id: userId, content: assistantResponseContent, role: "assistant" });
+      
+      if (assistantMsgError) {
+        console.error("Error saving assistant message:", assistantMsgError);
+      }
 
       // 8. Reset inputs
       setQuestion("");
