@@ -80,8 +80,8 @@ serve(async (req) => {
     }
 
     const genAI = new GoogleGenerativeAI(LLM_API_KEY);
-    // Using gemini-1.5-flash-latest as requested
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+    // Using gemini-2.5-flash as requested
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const parts: Part[] = [];
 
