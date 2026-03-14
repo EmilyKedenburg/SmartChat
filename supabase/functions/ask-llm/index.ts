@@ -14,14 +14,14 @@ async function fetchUrlContent(url: string): Promise<string | null> {
     console.log(`[ask-llm] Fetching URL content: ${url}`);
     const response = await fetch(url);
     if (!response.ok) {
-      console.warn(`[ask-llm] Failed to fetch URL ${url}: ${response.status} ${response.statusText}`);
+      console.warn(`[ask-llm] Failed to fetch URL ${url}: ${response.statusText}`);
       return null;
     }
     const html = await response.text();
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
     if (doc) {
-      const contentElements = doc.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li, span, article");
+      const contentElements = doc.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li, span");
       let extractedText = "";
       if (contentElements.length > 0) {
         extractedText = Array.from(contentElements).map(el => el.textContent).join("\n");
@@ -90,10 +90,11 @@ serve(async (req) => {
     }
 
     const genAI = new GoogleGenerativeAI(LLM_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const parts: Part[] = [];
 
+    // Add system instructions
     parts.push({ text: "You are a helpful AI assistant. Use the provided context (files and URLs) to answer the user's question. If the answer is not in the context, say so, but try to be as helpful as possible using the information you have. Always cite your sources by name.\n\n" });
 
     if (conversationHistory && conversationHistory.length > 0) {
@@ -130,6 +131,7 @@ serve(async (req) => {
               await supabaseClient.from('sources').update({ content: content }).eq('id', source.id);
             }
           } else if (source.storage_path) {
+            // Check if it's a text-based file
             const isText = source.type.startsWith('text/') || 
                            source.name.endsWith('.txt') || 
                            source.name.endsWith('.csv') || 
