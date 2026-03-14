@@ -12,33 +12,22 @@ const corsHeaders = {
 async function fetchUrlContent(url: string): Promise<string | null> {
   try {
     console.log(`[ask-llm] Fetching URL content: ${url}`);
-    // Adding a User-Agent header as some sites block requests without one
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      }
-    });
-    
+    const response = await fetch(url);
     if (!response.ok) {
       console.warn(`[ask-llm] Failed to fetch URL ${url}: ${response.status} ${response.statusText}`);
       return null;
     }
-    
     const html = await response.text();
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
-    
     if (doc) {
-      // Target common content elements
       const contentElements = doc.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li, span, article");
       let extractedText = "";
-      
       if (contentElements.length > 0) {
         extractedText = Array.from(contentElements).map(el => el.textContent).join("\n");
       } else {
         extractedText = doc.body?.textContent || "";
       }
-      
       const cleaned = extractedText.replace(/\s+/g, ' ').trim();
       console.log(`[ask-llm] Extracted ${cleaned.length} characters from URL.`);
       return cleaned;
@@ -101,12 +90,10 @@ serve(async (req) => {
     }
 
     const genAI = new GoogleGenerativeAI(LLM_API_KEY);
-    // Using gemini-1.5-flash for better stability and availability
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const parts: Part[] = [];
 
-    // Add system instructions
     parts.push({ text: "You are a helpful AI assistant. Use the provided context (files and URLs) to answer the user's question. If the answer is not in the context, say so, but try to be as helpful as possible using the information you have. Always cite your sources by name.\n\n" });
 
     if (conversationHistory && conversationHistory.length > 0) {
@@ -143,7 +130,6 @@ serve(async (req) => {
               await supabaseClient.from('sources').update({ content: content }).eq('id', source.id);
             }
           } else if (source.storage_path) {
-            // Check if it's a text-based file
             const isText = source.type.startsWith('text/') || 
                            source.name.endsWith('.txt') || 
                            source.name.endsWith('.csv') || 
