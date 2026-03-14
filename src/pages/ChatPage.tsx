@@ -383,7 +383,7 @@ const ChatPage = () => {
                   type="file"
                   multiple
                   onChange={handleFileChange}
-                  className="text-xs"
+                  className="h-auto py-1.5 text-xs cursor-pointer"
                   disabled={isLoadingResponse}
                 />
                 <div className="mt-1 flex flex-wrap gap-1">
