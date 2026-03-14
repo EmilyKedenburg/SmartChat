@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MadeWithDyad } from "@/components/made-with-dyad";
-import { X, Send, Loader2, FileText, LogOut } from "lucide-react";
+import { X, Send, Loader2, FileText, LogOut, User } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "@/providers/SessionContextProvider";
 import { supabase } from "@/integrations/supabase/client";
@@ -24,14 +24,6 @@ interface Message {
   created_at: string;
 }
 
-interface Source {
-  id: string;
-  type: string;
-  name: string;
-  content?: string;
-  storage_path?: string;
-}
-
 const ChatPage = () => {
   const { session, isLoading: isSessionLoading } = useSession();
   const navigate = useNavigate();
@@ -46,18 +38,10 @@ const ChatPage = () => {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Define accent colors for consistency
   const primaryAccentColor = "#9CC97F";
   const secondaryAccentColor = "#537E72";
 
   useEffect(() => {
-    if (!isSessionLoading && !session) {
-      navigate("/login");
-    }
-  }, [session, isSessionLoading, navigate]);
-
-  useEffect(() => {
-    // Scroll to bottom of messages whenever messages update
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
@@ -90,16 +74,13 @@ const ChatPage = () => {
   };
 
   const handleLogout = async () => {
-    setIsLoadingResponse(true); // Disable inputs during logout
     const { error } = await supabase.auth.signOut();
     if (error) {
-      console.error("Error logging out:", error);
       showError("Failed to log out.");
     } else {
       showSuccess("Logged out successfully!");
-      navigate("/login"); // Redirect to login page after logout
+      navigate("/login");
     }
-    setIsLoadingResponse(false);
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -122,7 +103,6 @@ const ChatPage = () => {
       let allSourceIdsForLLM: string[] = [];
 
       if (!currentChat) {
-        // Create a new chat if it's the first message
         const { data: newChat, error: chatError } = await supabase
           .from("chats")
           .insert({ user_id: userId, title: trimmedQuestion.substring(0, 50) || "New Chat" })
@@ -133,170 +113,104 @@ const ChatPage = () => {
         currentChat = newChat.id;
         setCurrentChatId(newChat.id);
       } else {
-        // For existing chat, fetch all existing sources
         const { data: existingSources, error: fetchExistingSourcesError } = await supabase
           .from("sources")
           .select("id")
           .eq("chat_id", currentChat)
           .eq("user_id", userId);
 
-        if (fetchExistingSourcesError) {
-          console.error("Error fetching existing sources:", fetchExistingSourcesError);
-          showError("Failed to retrieve existing sources for this chat.");
-          // Continue without existing sources if there's an error
-        } else {
+        if (!fetchExistingSourcesError) {
           allSourceIdsForLLM = existingSources?.map(s => s.id) || [];
         }
       }
 
-      // Add user message to state and database
       const userMessage: Message = {
-        id: crypto.randomUUID(), // Client-side ID for immediate display
+        id: crypto.randomUUID(),
         content: trimmedQuestion,
         role: "user",
         created_at: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, userMessage]);
 
-      const { error: insertUserMessageError } = await supabase
+      await supabase
         .from("messages")
         .insert({ chat_id: currentChat, user_id: userId, content: trimmedQuestion, role: "user" });
-      if (insertUserMessageError) throw insertUserMessageError;
 
-      // Handle new file uploads to Supabase Storage and create source entries
       const fileProcessingPromises = files.map(async (file) => {
         const filePath = `${userId}/${currentChat}/${file.name}`;
-        const { data: uploadData, error: uploadError } = await supabase.storage
+        const { error: uploadError } = await supabase.storage
           .from("chat-files")
-          .upload(filePath, file, {
-            cacheControl: "3600",
-            upsert: false,
-          });
+          .upload(filePath, file, { upsert: true });
 
-        if (uploadError) {
-          console.error("Error uploading file:", uploadError);
-          showError(`Failed to upload file ${file.name}: ${uploadError.message}`);
-          return null; // Indicate failure for this file
-        }
+        if (uploadError) return null;
 
-        // Insert source entry for the uploaded file
         const { data: sourceData, error: insertSourceError } = await supabase
           .from("sources")
           .insert({ chat_id: currentChat, user_id: userId, type: file.type || "application/octet-stream", name: file.name, storage_path: filePath })
           .select("id")
           .single();
 
-        if (insertSourceError) {
-          console.error("Error inserting file source:", insertSourceError);
-          showError(`Failed to record file source ${file.name}: ${insertSourceError.message}`);
-          return null;
-        }
+        if (insertSourceError) return null;
 
-        let extractedContent = null;
-        let edgeFunctionError = null;
-
-        // Determine which Edge Function to invoke based on file type
-        if (file.type === 'application/pdf') {
-          // PDFs are now handled by Gemini directly via URL, no client-side extraction needed
-          showSuccess(`PDF file ${file.name} uploaded. Content will be processed by AI via URL.`);
-        } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-          const { data: extractData, error } = await supabase.functions.invoke("extract-docx", {
+        if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+          const { data: extractData } = await supabase.functions.invoke("extract-docx", {
             body: { sourceId: sourceData.id },
           });
-          edgeFunctionError = error || extractData.error;
-          extractedContent = extractData?.extractedContent;
-          if (edgeFunctionError) {
-            console.error(`Error invoking extract-docx for ${file.name}:`, edgeFunctionError);
-            showError(`Failed to extract text from DOCX ${file.name}: ${edgeFunctionError.message || edgeFunctionError}`);
-          } else if (!extractedContent) {
-            showError(`No content extracted from DOCX ${file.name}.`);
-          } else {
-            showSuccess(`DOCX content extracted and saved for ${file.name}.`);
+          if (extractData?.extractedContent) {
+            await supabase.from("sources").update({ content: extractData.extractedContent }).eq("id", sourceData.id);
           }
-        } else if (file.type.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv')) {
-          showSuccess(`Text file ${file.name} uploaded. Content will be processed by AI.`);
-        } else {
-          showError(`Unsupported file type for extraction: ${file.name}.`);
-          return null; // Do not add source if type is unsupported
-        }
-
-        // Update the source with the extracted content if available (for non-PDFs)
-        if (extractedContent && !edgeFunctionError) {
-          const { error: updateContentError } = await supabase
-            .from("sources")
-            .update({ content: extractedContent })
-            .eq("id", sourceData.id);
-
-          if (updateContentError) {
-            console.error(`Error updating source ${sourceData.id} with extracted content:`, updateContentError);
-            showError(`Failed to save extracted content for ${file.name}.`);
-            return null;
-          }
-        } else if (edgeFunctionError && file.type !== 'application/pdf') { // Only return null if extraction failed for non-PDFs
-          return null; 
         }
         
-        return sourceData.id; // Return the source ID for successful processing
+        return sourceData.id;
       });
 
       const newFileSourceIds = (await Promise.all(fileProcessingPromises)).filter(Boolean) as string[];
       allSourceIdsForLLM.push(...newFileSourceIds);
 
-      // Handle new URLs as sources
       const urlProcessingPromises = filteredUrls.map(async (url) => {
         const { data: sourceData, error: insertSourceError } = await supabase
           .from("sources")
-          .insert({ chat_id: currentChat, user_id: userId, type: "url", name: url, content: url }) // content initially stores the URL itself
+          .insert({ chat_id: currentChat, user_id: userId, type: "url", name: url, content: url })
           .select("id")
           .single();
 
-        if (insertSourceError) {
-          console.error("Error inserting URL source:", insertSourceError);
-          showError(`Failed to record URL source ${url}: ${insertSourceError.message}`);
-          return null;
-        }
+        if (insertSourceError) return null;
         return sourceData.id;
       });
 
       const newUrlSourceIds = (await Promise.all(urlProcessingPromises)).filter(Boolean) as string[];
       allSourceIdsForLLM.push(...newUrlSourceIds);
 
-      // Remove duplicates from allSourceIdsForLLM if any
       allSourceIdsForLLM = Array.from(new Set(allSourceIdsForLLM));
 
-      // Prepare conversation history for the LLM (last 10 messages)
       const conversationHistoryForLLM = messages.slice(-10).map(msg => ({
         role: msg.role,
         content: msg.content,
       }));
 
-      // Invoke Edge Function with question, all relevant source IDs, and conversation history
       const { data, error: edgeFunctionError } = await supabase.functions.invoke("ask-llm", {
         body: {
           question: trimmedQuestion,
-          sourceIds: allSourceIdsForLLM, // Pass the combined list of source IDs
+          sourceIds: allSourceIdsForLLM,
           messages: conversationHistoryForLLM,
         },
       });
 
-      if (edgeFunctionError) throw edgeFunctionError;
-      if (data.error) throw new Error(data.error);
+      if (edgeFunctionError || data.error) throw new Error(edgeFunctionError?.message || data.error);
 
       const assistantResponseContent = data.response || "No response from LLM.";
 
-      // Add assistant message to state and database
       const assistantMessage: Message = {
-        id: crypto.randomUUID(), // Client-side ID for immediate display
+        id: crypto.randomUUID(),
         content: assistantResponseContent,
         role: "assistant",
         created_at: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, assistantMessage]);
 
-      const { error: insertAssistantMessageError } = await supabase
+      await supabase
         .from("messages")
         .insert({ chat_id: currentChat, user_id: userId, content: assistantResponseContent, role: "assistant" });
-      if (insertAssistantMessageError) throw insertAssistantMessageError;
 
       setQuestion("");
       setFiles([]);
@@ -304,8 +218,8 @@ const ChatPage = () => {
       showSuccess("Response received!");
 
     } catch (error: any) {
-      console.error("Chat submission error:", error);
-      showError(`Failed to get response: ${error.message || "Unknown error"}`);
+      console.error("Chat error:", error);
+      showError(`Failed to get response: ${error.message}`);
     } finally {
       setIsLoadingResponse(false);
     }
@@ -315,17 +229,18 @@ const ChatPage = () => {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900">
         <Loader2 className="h-8 w-8 animate-spin text-gray-600 dark:text-gray-400" />
-        <p className="ml-2 text-xl text-gray-600 dark:text-gray-400">Loading session...</p>
       </div>
     );
   }
+
+  const isGuest = session?.user?.email === 'guest@example.com';
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-between bg-gray-100 dark:bg-gray-900 p-4">
       <Card className="w-full max-w-2xl bg-white dark:bg-gray-800 shadow-lg rounded-lg flex flex-col h-[90vh]">
         <CardHeader className="pb-4 relative flex items-center justify-between">
           <CardTitle
-            className="text-3xl font-bold text-gray-900 dark:text-white"
+            className="text-3xl font-bold"
             style={{ color: secondaryAccentColor }}
           >
             Smart Chat
@@ -334,40 +249,35 @@ const ChatPage = () => {
             {currentChatId && (
               <Dialog open={isSourcesDialogOpen} onOpenChange={setIsSourcesDialogOpen}>
                 <DialogTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-600"
-                  >
-                    <FileText className="h-4 w-4 mr-2" /> View Sources
+                  <Button variant="outline" size="sm">
+                    <FileText className="h-4 w-4 mr-2" /> Sources
                   </Button>
                 </DialogTrigger>
                 <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto dark:bg-gray-800">
                   <DialogHeader>
-                    <DialogTitle className="text-gray-900 dark:text-white">Chat Sources</DialogTitle>
+                    <DialogTitle>Chat Sources</DialogTitle>
                   </DialogHeader>
                   <SourceDisplay chatId={currentChatId} />
                 </DialogContent>
               </Dialog>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleLogout}
-              className="dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-600"
-              disabled={isLoadingResponse}
-            >
-              <LogOut className="h-4 w-4 mr-2" /> Logout
-            </Button>
+            {isGuest ? (
+              <Button variant="outline" size="sm" onClick={() => navigate('/login')}>
+                <User className="h-4 w-4 mr-2" /> Login
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" onClick={handleLogout}>
+                <LogOut className="h-4 w-4 mr-2" /> Logout
+              </Button>
+            )}
           </div>
         </CardHeader>
         <div className="flex-grow flex flex-col overflow-hidden">
-          {/* Message Display Area */}
           <ScrollArea className="flex-grow px-6 pt-6 pb-4 border-t border-b dark:border-gray-700">
             <div className="space-y-4">
               {messages.length === 0 && (
-                <div className="text-center text-gray-500 dark:text-gray-400">
-                  Start a conversation by asking a question or providing sources.
+                <div className="text-center text-gray-500">
+                  Ask a question or upload a file to start.
                 </div>
               )}
               {messages.map((msg) => (
@@ -379,7 +289,6 @@ const ChatPage = () => {
                 >
                   {msg.role === "assistant" && (
                     <Avatar>
-                      <AvatarImage src="/placeholder.svg" alt="Assistant" />
                       <AvatarFallback style={{ backgroundColor: secondaryAccentColor, color: primaryAccentColor }}>AI</AvatarFallback>
                     </Avatar>
                   )}
@@ -391,14 +300,10 @@ const ChatPage = () => {
                     }`}
                     style={msg.role === "user" ? { backgroundColor: primaryAccentColor, color: "white" } : {}}
                   >
-                    <p className="text-sm">{msg.content}</p>
-                    <p className="text-xs text-right mt-1 opacity-75">
-                      {new Date(msg.created_at).toLocaleTimeString()}
-                    </p>
+                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                   </div>
                   {msg.role === "user" && (
                     <Avatar>
-                      <AvatarImage src="/placeholder.svg" alt="User" />
                       <AvatarFallback style={{ backgroundColor: primaryAccentColor, color: secondaryAccentColor }}>
                         {session?.user?.email ? session.user.email[0].toUpperCase() : "U"}
                       </AvatarFallback>
@@ -406,113 +311,72 @@ const ChatPage = () => {
                   )}
                 </div>
               ))}
-              {messages.length > 0 && <div ref={messagesEndRef} />}
+              <div ref={messagesEndRef} />
             </div>
           </ScrollArea>
 
-          {/* Input Form */}
           <form onSubmit={handleSubmit} className="p-6 space-y-4 border-t dark:border-gray-700 flex-shrink-0">
-            {/* Question Input */}
-            <div>
-              <Label htmlFor="question" className="sr-only">
-                Your Question
-              </Label>
-              <Textarea
-                id="question"
-                placeholder="Type your question here..."
-                value={question}
-                onChange={handleQuestionChange}
-                rows={2}
-                className="w-full p-3 border rounded-md focus:ring-2 focus:ring-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                disabled={isLoadingResponse}
-              />
-            </div>
+            <Textarea
+              placeholder="Type your question here..."
+              value={question}
+              onChange={handleQuestionChange}
+              rows={2}
+              className="w-full p-3 border rounded-md dark:bg-gray-700 dark:text-white"
+              disabled={isLoadingResponse}
+            />
 
-            {/* File Upload */}
-            <div>
-              <Label htmlFor="file-upload" className="text-sm font-medium mb-2 block">
-                Upload Files (Supported: .txt, .pdf, .csv, .docx)
-              </Label>
-              <Input
-                id="file-upload"
-                type="file"
-                multiple
-                onChange={handleFileChange}
-                className="block w-full h-auto py-2 text-sm text-gray-500 dark:text-gray-400"
-                disabled={isLoadingResponse}
-              />
-              <div className="mt-2 space-y-1">
-                {files.map((file, index) => (
-                  <div key={index} className="flex items-center justify-between bg-gray-50 dark:bg-gray-700 p-2 rounded-md">
-                    <span className="text-sm text-gray-700 dark:text-gray-300">{file.name}</span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleRemoveFile(index)}
-                      className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                      disabled={isLoadingResponse}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label className="text-xs font-medium mb-1 block">Upload Files</Label>
+                <Input
+                  type="file"
+                  multiple
+                  onChange={handleFileChange}
+                  className="text-xs"
+                  disabled={isLoadingResponse}
+                />
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {files.map((file, index) => (
+                    <div key={index} className="flex items-center bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-[10px]">
+                      <span className="truncate max-w-[100px]">{file.name}</span>
+                      <X className="h-3 w-3 ml-1 cursor-pointer text-red-500" onClick={() => handleRemoveFile(index)} />
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
 
-            {/* URL Input */}
-            <div>
-              <Label className="text-sm font-medium mb-2 block">
-                Provide Website URLs
-              </Label>
-              <div className="space-y-2">
-                {urls.map((url, index) => (
-                  <div key={index} className="flex items-center space-x-2">
-                    <Input
-                      type="url"
-                      placeholder="https://example.com"
-                      value={url}
-                      onChange={(e) => handleUrlChange(index, e.target.value)}
-                      className="flex-grow p-3 border rounded-md focus:ring-2 focus:ring-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                      disabled={isLoadingResponse}
-                    />
-                    {urls.length > 1 && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleRemoveUrl(index)}
-                        className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+              <div>
+                <Label className="text-xs font-medium mb-1 block">Add URLs</Label>
+                <div className="space-y-1">
+                  {urls.map((url, index) => (
+                    <div key={index} className="flex items-center space-x-1">
+                      <Input
+                        type="url"
+                        placeholder="https://..."
+                        value={url}
+                        onChange={(e) => handleUrlChange(index, e.target.value)}
+                        className="h-8 text-xs"
                         disabled={isLoadingResponse}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                ))}
-                <Button type="button" onClick={handleAddUrl} variant="outline" className="w-full" disabled={isLoadingResponse}>
-                  Add another URL
-                </Button>
+                      />
+                      {urls.length > 1 && (
+                        <X className="h-4 w-4 cursor-pointer text-red-500" onClick={() => handleRemoveUrl(index)} />
+                      )}
+                    </div>
+                  ))}
+                  <Button type="button" onClick={handleAddUrl} variant="ghost" className="h-6 text-[10px] w-full" disabled={isLoadingResponse}>
+                    + Add URL
+                  </Button>
+                </div>
               </div>
             </div>
 
             <Button
               type="submit"
-              className="w-full py-3 text-lg font-semibold"
+              className="w-full py-2 font-semibold"
               style={{ backgroundColor: primaryAccentColor, color: "#030816" }}
               disabled={isLoadingResponse}
             >
-              {isLoadingResponse ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Getting Response...
-                </>
-              ) : (
-                <>
-                  <Send className="mr-2 h-4 w-4" />
-                  Submit
-                </>
-              )}
+              {isLoadingResponse ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit"}
             </Button>
           </form>
         </div>

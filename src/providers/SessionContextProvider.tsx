@@ -3,7 +3,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { Session, SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
-import { useNavigate } from "react-router-dom";
 
 interface SessionContextType {
   session: Session | null;
@@ -13,39 +12,49 @@ interface SessionContextType {
 
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
 
+// Mock session for guest access
+const GUEST_SESSION: Session = {
+  user: { 
+    id: '00000000-0000-0000-0000-000000000000', 
+    email: 'guest@example.com',
+    app_metadata: {},
+    user_metadata: {},
+    aud: 'authenticated',
+    created_at: new Date().toISOString(),
+  },
+  access_token: '',
+  refresh_token: '',
+  expires_in: 3600,
+  token_type: 'bearer',
+} as any;
+
 export const SessionContextProvider = ({ children }: { children: React.ReactNode }) => {
-  const [session, setSession] = useState<Session | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const navigate = useNavigate();
+  const [session, setSession] = useState<Session | null>(GUEST_SESSION);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     const { data: authListener } = supabase.auth.onAuthStateChange(
       async (event, currentSession) => {
-        setSession(currentSession);
-        setIsLoading(false);
-
-        if (event === "SIGNED_IN") {
-          navigate("/"); // Redirect authenticated users to the main page (now ChatPage)
-        } else if (event === "SIGNED_OUT") {
-          navigate("/login"); // Redirect unauthenticated users to the login page
+        if (currentSession) {
+          setSession(currentSession);
+        } else {
+          setSession(GUEST_SESSION);
         }
+        setIsLoading(false);
       }
     );
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setIsLoading(false);
-      if (!session) {
-        navigate("/login");
-      } else {
-        navigate("/"); // Redirect to the main page (ChatPage) if session exists
+    supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
+      if (currentSession) {
+        setSession(currentSession);
       }
+      setIsLoading(false);
     });
 
     return () => {
       authListener.subscription.unsubscribe();
     };
-  }, [navigate]);
+  }, []);
 
   return (
     <SessionContext.Provider value={{ session, isLoading, supabase }}>
